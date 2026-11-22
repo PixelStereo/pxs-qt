@@ -1,12 +1,11 @@
 #include <pxs/QueryServer.h>
 #include <WebSocketFrame.h>
 #include <pxs/Convert.h>
-#include <pxs/core/tree/oscquery.h>
+#include <pxs/core/tree/oscquery_server.h>
 
 #include <QJsonDocument>
 #include <QNetworkInterface>
 #include <QTimer>
-#include <QUrl>
 
 namespace pxs {
 
@@ -93,16 +92,10 @@ int QueryServer::webSocketCount() const
 
 bool QueryServer::originAllowed(const QByteArray &origin)
 {
-    if (origin.isEmpty()) return true;
-    const QString host = QUrl(QString::fromUtf8(origin)).host();
-    if (host.isEmpty()) return false; // "null": a sandboxed frame of any page sends it
-    if (host.compare(QLatin1String("localhost"), Qt::CaseInsensitive) == 0) return true;
-    const QHostAddress address(host);
-    if (address.isNull()) return false; // a name: a rebound DNS name reaches this machine too
-    if (address.isLoopback()) return true;
-    for (const QHostAddress &own : QNetworkInterface::allAddresses())
-        if (own.isEqual(address, QHostAddress::TolerantConversion)) return true;
-    return false;
+    // The decision is pxs-core's; what Qt adds is this machine's own addresses
+    std::vector<std::string> own;
+    for (const QHostAddress &address : QNetworkInterface::allAddresses()) own.push_back(address.toString().toStdString());
+    return core::tree::originAllowed(std::string_view(origin.constData(), std::size_t(origin.size())), own);
 }
 
 void QueryServer::stream(const QString &address, const QByteArray &packet)
@@ -142,8 +135,8 @@ bool QueryServer::upgrade(QTcpSocket *socket, const QList<QByteArray> &request, 
 
 void QueryServer::command(QTcpSocket *socket, const QByteArray &json)
 {
-    const QJsonObject o = QJsonDocument::fromJson(json).object();
-    const QString what = o.value("COMMAND").toString(), path = o.value("DATA").toString();
+    const core::tree::Command parsed = core::tree::parseCommand(std::string_view(json.constData(), std::size_t(json.size())));
+    const QString what = convert::fromUtf8(parsed.command), path = convert::fromUtf8(parsed.data);
     Client &c = m_clients[socket];
     if (what == QLatin1String("LISTEN") && !path.isEmpty() && c.listening.size() < kMaxListening) c.listening.insert(path);
     else if (what == QLatin1String("IGNORE")) c.listening.remove(path);
@@ -214,53 +207,16 @@ void QueryServer::onReadyRead(QTcpSocket *socket)
 
 QueryServer::Response QueryServer::answer(const QString &method, const QByteArray &target) const
 {
+    // What is answered is pxs-core's (the same on every platform); this server reads the request and writes the bytes
+    core::tree::ServerInfo info;
+    info.name = convert::toUtf8(m_name);
+    info.oscPort = m_oscPort;
+    info.extensionsJson = convert::toJsonText(m_extensions);
+    info.moreJson = convert::toJsonText(m_more);
+    const core::tree::HttpAnswer a = core::tree::answerRequest(*m_tree, info, method.toStdString(), std::string_view(target.constData(), std::size_t(target.size())));
     Response resp;
-    if (method == QLatin1String("OPTIONS")) {
-        resp.status = 204;
-        return resp;
-    }
-    if (method != QLatin1String("GET") && method != QLatin1String("HEAD")) {
-        resp.status = 405;
-        return resp;
-    }
-
-    const QUrl url = QUrl::fromEncoded(target, QUrl::TolerantMode);
-    if (!url.isValid()) {
-        resp.status = 400;
-        return resp;
-    }
-    QString path = url.path();
-    if (path.isEmpty()) path = QStringLiteral("/");
-    const QString query = url.query().toUpper();
-
-    const std::string where = convert::toUtf8(path);
-    std::string json; // the answer, as JSON text
-    if (query == QLatin1String("HOST_INFO")) {
-        json = core::tree::hostInfoJson(convert::toUtf8(m_name), m_oscPort, convert::toJsonText(m_extensions), convert::toJsonText(m_more));
-    } else if (!query.isEmpty()) {
-        if (!core::tree::attributeJson(*m_tree, where, convert::toUtf8(query), json)) {
-            resp.status = 404;
-            return resp;
-        }
-        if (json == "{}") {
-            const core::tree::Node *node = m_tree->find(where);
-            const bool known = query == QLatin1String("FULL_PATH") || query == QLatin1String("CONTENTS") || query == QLatin1String("TYPE") ||
-                               m_extensions.value(query).toBool() || node->attributes.count(convert::toUtf8(query)) > 0;
-            // 204: a value asked of what cannot be read, or an attribute this server does not have; otherwise the node
-            // has no such attribute (a container's TYPE, a signal's VALUE): an empty object
-            if ((query == QLatin1String("VALUE") && !(node->access & 1)) || !known) {
-                resp.status = 204;
-                return resp;
-            }
-        }
-    } else {
-        json = core::tree::describeJson(*m_tree, where);
-        if (json == "{}") {
-            resp.status = 404;
-            return resp;
-        }
-    }
-    resp.body = QByteArray(json.data(), qsizetype(json.size()));
+    resp.status = a.status;
+    resp.body = QByteArray(a.body.data(), qsizetype(a.body.size()));
     return resp;
 }
 
