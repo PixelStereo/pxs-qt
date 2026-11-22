@@ -154,7 +154,7 @@ add_library(pxs_midi STATIC src/midi/Midi.cpp src/midi/MidiMessage.cpp src/midi/
 add_library(pxs::midi ALIAS pxs_midi)
 set_target_properties(pxs_midi PROPERTIES AUTOMOC ON POSITION_INDEPENDENT_CODE ON)
 target_include_directories(pxs_midi PUBLIC src/midi)
-target_link_libraries(pxs_midi PUBLIC pxs::interaction Qt6::Core)
+target_link_libraries(pxs_midi PUBLIC pxs::interaction Qt6::Core PRIVATE pxs-core::midi)
 if(PXS_RTMIDI_TARGET)
     target_link_libraries(pxs_midi PUBLIC ${PXS_RTMIDI_TARGET})
     target_compile_definitions(pxs_midi PUBLIC PXS_HAS_RTMIDI)

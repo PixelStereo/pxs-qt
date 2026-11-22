@@ -1,73 +1,33 @@
 #include "pxs/Midi.h"
 
-#include <algorithm>
-#include <cmath>
+#include <pxs/core/midi/message.h>
 
 namespace pxs::midi {
 
-namespace {
-uint8_t data7(double v) { return uint8_t(std::clamp(int(std::lround(v * 127.0)), 0, 127)); }
-uint8_t channelByte(int channel) { return uint8_t(std::clamp(channel, 1, 16) - 1); }
-uint8_t number7(int n) { return uint8_t(std::clamp(n, 0, 127)); }
-} // namespace
+// The bytes of the messages, and how they are read, are pxs-core's (pxs::core::midi); this layer only fills the
+// interaction's event. The kinds have the same values on both sides.
+static_assert(int(MidiMessageKind::ControlChange) == int(core::midi::Kind::ControlChange) &&
+              int(MidiMessageKind::Note) == int(core::midi::Kind::Note) &&
+              int(MidiMessageKind::PitchBend) == int(core::midi::Kind::PitchBend) &&
+              int(MidiMessageKind::ProgramChange) == int(core::midi::Kind::ProgramChange));
 
 bool parse(const uint8_t *m, size_t n, InteractionEvent &e)
 {
-    if (!m || n < 2) return false;
-    const int status = m[0] & 0xF0;
-    switch (status) {
-    case 0xB0:
-        if (n < 3) return false;
-        e.message = MidiMessageKind::ControlChange;
-        e.number = m[1] & 0x7F;
-        e.value = (m[2] & 0x7F) / 127.0;
-        break;
-    case 0x90:
-    case 0x80:
-        if (n < 3) return false;
-        e.message = MidiMessageKind::Note;
-        e.number = m[1] & 0x7F;
-        e.value = status == 0x90 ? (m[2] & 0x7F) / 127.0 : 0.0; // note on at velocity 0: off
-        break;
-    case 0xE0:
-        if (n < 3) return false;
-        e.message = MidiMessageKind::PitchBend;
-        e.number = 0;
-        e.value = (((m[2] & 0x7F) << 7) | (m[1] & 0x7F)) / 16383.0;
-        break;
-    case 0xC0:
-        e.message = MidiMessageKind::ProgramChange;
-        e.number = m[1] & 0x7F;
-        e.value = 1.0; // a program chosen: up (then down at once, by the caller)
-        break;
-    default: return false;
-    }
+    core::midi::Message message;
+    if (!core::midi::parse(m, n, message)) return false;
+    e.message = static_cast<MidiMessageKind>(message.kind);
+    e.number = message.number;
+    e.value = message.value;
     e.source = InteractionSource::Midi;
-    e.channel = (m[0] & 0x0F) + 1;
+    e.channel = message.channel;
     return true;
 }
 
-std::vector<uint8_t> controlChange(int channel, int controller, double value)
-{
-    return {uint8_t(0xB0 | channelByte(channel)), number7(controller), data7(value)};
-}
-std::vector<uint8_t> noteOn(int channel, int note, double velocity)
-{
-    return {uint8_t(0x90 | channelByte(channel)), number7(note), data7(velocity)};
-}
-std::vector<uint8_t> noteOff(int channel, int note)
-{
-    return {uint8_t(0x80 | channelByte(channel)), number7(note), 0};
-}
-std::vector<uint8_t> pitchBend(int channel, double value)
-{
-    const int v = std::clamp(int(std::lround(value * 16383.0)), 0, 16383);
-    return {uint8_t(0xE0 | channelByte(channel)), uint8_t(v & 0x7F), uint8_t(v >> 7)};
-}
-std::vector<uint8_t> programChange(int channel, int program)
-{
-    return {uint8_t(0xC0 | channelByte(channel)), number7(program)};
-}
+std::vector<uint8_t> controlChange(int channel, int controller, double value) { return core::midi::controlChange(channel, controller, value); }
+std::vector<uint8_t> noteOn(int channel, int note, double velocity) { return core::midi::noteOn(channel, note, velocity); }
+std::vector<uint8_t> noteOff(int channel, int note) { return core::midi::noteOff(channel, note); }
+std::vector<uint8_t> pitchBend(int channel, double value) { return core::midi::pitchBend(channel, value); }
+std::vector<uint8_t> programChange(int channel, int program) { return core::midi::programChange(channel, program); }
 
 void learn(Interaction &it, const InteractionEvent &e)
 {
