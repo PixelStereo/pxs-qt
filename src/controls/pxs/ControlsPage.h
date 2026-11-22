@@ -165,7 +165,7 @@ inline constexpr char kScriptA[] = R"JS(
   const sv = (tag, attrs, parent) => { const e = document.createElementNS(NS, tag); for (const k in attrs || {}) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; };
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
   let pin = new URLSearchParams(location.search).get('pin') || sessionStorage.getItem('nyxmap-pin') || '', needPin = true;
-  let filterCat = null, busyAt = 0, ws = null, opened = false, failures = 0, controls = [], sizes = {}, inspectorMode = 'always', nameParts = 2, sharedPage = false, sel = new Set(), values = {}, byId = {}, pageId = -1, editing = false, busy = 0, again = false, sheetId = 0;
+  let graphHist = {}, filterCat = null, busyAt = 0, ws = null, opened = false, failures = 0, controls = [], sizes = {}, inspectorMode = 'always', nameParts = 2, sharedPage = false, sel = new Set(), values = {}, byId = {}, pageId = -1, editing = false, busy = 0, again = false, sheetId = 0;
   const active = new Set(), sendAt = {}, tiles = {};
   const state = (text, cls) => { const s = $('#state'); s.textContent = text; s.className = cls || ''; };
   const send = obj => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj)); };
@@ -362,8 +362,9 @@ inline constexpr char kScriptB2[] = R"JS(
   function graph(c) {
     const root = el('div', 'graph'), s = sv('svg', { viewBox: '0 0 100 40', preserveAspectRatio: 'none' }, root), line = sv('polyline', { fill: 'none', 'stroke-width': '1.5', 'vector-effect': 'non-scaling-stroke' }, s);
     line.setAttribute('class', 'gline');
-    const span = (c.max - c.min) || 1, hist = []; let at = 0;
+    const span = (c.max - c.min) || 1, hist = graphHist[c.id] || (graphHist[c.id] = []); // kept by tile: the page is drawn again (edit mode, a new layout), the last seconds stay
     const draw = () => line.setAttribute('points', hist.map((h, i) => (i * 100 / 119).toFixed(1) + ',' + (38 - h * 36).toFixed(1)).join(' '));
+    draw();
     return { el: root, set: x => { hist.push(clamp((x - c.min) / span, 0, 1)); if (hist.length > 120) hist.shift(); draw(); } };
   }
   function led(c) { const root = el('div', 'led'); return { el: root, set: x => root.classList.toggle('on', x >= 0.5) }; }
