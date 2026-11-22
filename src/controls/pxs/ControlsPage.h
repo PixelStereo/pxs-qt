@@ -570,6 +570,9 @@ inline constexpr char kScriptC2[] = R"JS(
     tiles[c.id] = t;
     return t;
   }
+  // What changes the inspector's contents (not the numbers being typed in it): when it differs, the inspector is built again
+  const shapeOf = c => c ? JSON.stringify([c.kind, c.widget || '', c.dest || '', (c.targets || []).length, c.feedback == null ? -1 : c.feedback, !!c.ownRange, !!c.ro, !!c.signal, !!c.physTarget]) : '';
+  let sheetShape = '';
   function selectTile(id) { sel = id ? new Set([String(id)]) : new Set(); markSel(); }
   function markSel() { Object.keys(tiles).forEach(k => tiles[k].el.classList.toggle('sel', sel.has(k))); }
   function saveLayout() {
@@ -598,7 +601,7 @@ inline constexpr char kScriptC2[] = R"JS(
     if (pageId < 0) { grid.appendChild(el('div', '', 'No control yet. Add a parameter from the application: right-click it › Add to Controls Page, or drag its address here.')).id = 'empty'; $('#edit').hidden = true; return; }
     items = layoutOf(pageItems(pageId));
     items.forEach(it => grid.appendChild(tile(it).el));
-    placeAll(); update(); if (editing) { sel.forEach(k => { if (!byId[k]) sel.delete(k); }); if (sheetId && !byId[sheetId]) sheetId = 0; markSel(); if (sel.size > 1) multiInspector(); else if (sheetId) selectTile(sheetId); else inspector(); }
+    placeAll(); update(); if (editing) { sel.forEach(k => { if (!byId[k]) sel.delete(k); }); if (sheetId && !byId[sheetId]) sheetId = 0; markSel(); if (sel.size > 1) multiInspector(); else if (sheetId) { if (shapeOf(byId[sheetId]) !== sheetShape) openSheet(sheetId); else selectTile(sheetId); } else inspector(); }
   }
   function update() {
     for (const id in tiles) {
@@ -714,7 +717,7 @@ inline constexpr char kScriptD[] = R"JS(
   function openSheet(id) {
     const c = byId[id]; if (!c) return;
     unwatch();
-    sheetId = id; selectTile(id);
+    sheetId = id; sheetShape = shapeOf(c); selectTile(id);
     const sh = $('#sheet'); sh.textContent = '';
     const h2 = el('h2', '', c.kind === 'group' ? 'Section' : 'Tile'), x = el('button', 'hb', 'Done'); x.onclick = closeSheet; if (inspectorMode !== 'always') h2.appendChild(x); sh.appendChild(h2);
     const field = (label, node) => { sh.appendChild(el('label', '', label)); sh.appendChild(node); return node; };
@@ -748,10 +751,9 @@ inline constexpr char kScriptD[] = R"JS(
       }
     }
     if (c.dest && !(c.targets && c.targets.length) && c.kind !== 'group') { // a view of one address: who it talks to, and the way to change it
-      sh.appendChild(el('label', '', c.signal || c.ro ? 'Shows' : 'Talks to'));
+      sh.appendChild(el('label', '', c.signal || c.ro ? 'Shows' : 'Targets'));
       const ad = el('div', 'addr', c.dest); ad.style.cssText = 'font:12px ui-monospace,Menlo,monospace;word-break:break-all;padding:8px;border:1px solid var(--line);border-radius:9px;background:var(--panel2)'; sh.appendChild(ad);
-      sh.appendChild(el('div', 'hint', 'It also gets its value from there (the feedback). Drop another address from the tree on this tile to change it.'));
-      if (!c.signal && !c.ro && c.kind === 'slider') { const mb = el('button', 'hb', 'Send to several addresses…'); mb.title = 'Make it a multi-target interaction: this address becomes its first target'; mb.onclick = () => { flush(); send({ t: 'multitarget', id: c.id }); }; mb.style.marginTop = '6px'; sh.appendChild(mb); }
+      sh.appendChild(c.signal || c.ro ? el('div', 'hint', 'Drop another address from the tree on this tile to show that one instead.') : el('div', 'hint', 'One target, which also gives the feedback. Drop another address on the tile to replace it, or hold Alt while dropping to send to several: you then choose which one gives the feedback.'));
     }
     if (c.targets && c.targets.length) targetEditor(sh, c, numeric);
     if (c.kind === 'points' && c.balls && c.balls.length) ballEditor(sh, c, field, text, numeric);
