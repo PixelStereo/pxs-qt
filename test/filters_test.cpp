@@ -84,6 +84,14 @@ int main()
         check(m.targets.size() == 1 && m.feedback == -1, "its target removed: none");
     }
 
+    // A tile that only shows: read-only, kept through JSON, told to the page
+    {
+        Control r;
+        r.kind = Control::Kind::Slider;
+        r.readOnly = true;
+        check(Control::fromJson(r.toJson()).readOnly && r.wireJson().value("ro").toBool() && !Control().wireJson().contains("ro"), "a tile that is only shown is read-only");
+    }
+
     // The chain, at once
     FilterRunner run;
     const QJsonArray clamp{stage("clamp", 0.2, 0.8)};
