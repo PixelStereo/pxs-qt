@@ -751,7 +751,7 @@ inline constexpr char kScriptD[] = R"JS(
       sh.appendChild(el('label', '', c.signal || c.ro ? 'Shows' : 'Talks to'));
       const ad = el('div', 'addr', c.dest); ad.style.cssText = 'font:12px ui-monospace,Menlo,monospace;word-break:break-all;padding:8px;border:1px solid var(--line);border-radius:9px;background:var(--panel2)'; sh.appendChild(ad);
       sh.appendChild(el('div', 'hint', 'It also gets its value from there (the feedback). Drop another address from the tree on this tile to change it.'));
-      if (!c.signal && !c.ro && c.kind === 'slider') { const mb = el('button', 'hb', 'Send to several addresses…'); mb.title = 'Make it a multi-target interaction: this address becomes its first target'; mb.onclick = () => { flush(); send({ t: 'multi', id: c.id }); }; mb.style.marginTop = '6px'; sh.appendChild(mb); }
+      if (!c.signal && !c.ro && c.kind === 'slider') { const mb = el('button', 'hb', 'Send to several addresses…'); mb.title = 'Make it a multi-target interaction: this address becomes its first target'; mb.onclick = () => { flush(); send({ t: 'multitarget', id: c.id }); }; mb.style.marginTop = '6px'; sh.appendChild(mb); }
     }
     if (c.targets && c.targets.length) targetEditor(sh, c, numeric);
     if (c.kind === 'points' && c.balls && c.balls.length) ballEditor(sh, c, field, text, numeric);
