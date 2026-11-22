@@ -58,6 +58,12 @@ struct Physics {
 // One of the parameters a control sends to when it is a macro (Control::targets): the control's value (0 to 1 of its own range) goes through a
 // curve to this parameter's own range, `outMin` where the control is at its lowest and `outMax` at its highest (outMin above outMax: inverted).
 // A Pad sends its X to the targets of axis 0 and its Y to those of axis 1
+// What a tile's filters did to the last value set: the value that came in, and the value after each stage (0..1 of the tile's range)
+struct FilterTrace {
+    double in = 0;
+    std::vector<double> stages;
+};
+
 struct Target {
     quint64 scope = 0;
     QString path;

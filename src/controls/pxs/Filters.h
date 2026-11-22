@@ -13,6 +13,7 @@
 #include <utility>
 #include <vector>
 
+#include "Control.h"
 #include <Interactions.h>
 
 namespace pxs::controls {
@@ -33,6 +34,8 @@ public:
     std::optional<double> input(quint64 id, const QJsonArray &filters, double x);
     // `dt` seconds go by: the tiles whose result moved, with it (0..1)
     std::vector<std::pair<quint64, double>> step(double dt);
+    // What the stages made of the last value of a tile (none: nothing set yet)
+    std::optional<FilterTrace> trace(quint64 id) const;
     bool active() const; // some chain still moves by itself
     void forget(quint64 id) { m_runs.erase(id); }
     void clear() { m_runs.clear(); }

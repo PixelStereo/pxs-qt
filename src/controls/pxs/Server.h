@@ -18,6 +18,7 @@
 //   client -> {"t":"physicsWidget","id":"..","key":"friction"}   a slider for a physics setting of that control (a ball: "2.friction")
 //   client -> {"t":"reset","id":".."}   the control's reset button
 //   client -> {"t":"undo"} / {"t":"redo"}   the page's last change, back and forth (Backend::restore)
+//   client -> {"t":"watch","id":".."}   the filters of this tile are watched (0: none)   server -> {"t":"stages","id":..,"in":x,"v":[..]}
 //   client -> {"t":"rel","id":"..."}   the hand let go of a control: its physics (Control::physics) takes over
 //   client -> {"t":"drop","data":"<text>","onto":"<id>","page":"<id>","x":..,"y":..}   something dragged onto the page from outside (onto: the macro it fell on) (the application's own message: `message()`)
 //   client -> {"t":"layout","items":{"<id>":{"x","y","w","h"}}}   {"t":"edit","id":..,"props":{…}} (Control::applyProps)   {"t":"remove","id":..}
@@ -65,6 +66,8 @@ public:
     virtual bool update(quint64 id, const Control &changed) = 0;                    // a control's settings changed on the page
     virtual bool remove(quint64 id) = 0;
     virtual quint64 add(const Control &control) { Q_UNUSED(control) return 0; } // a control made on the page (a widget for a physics setting): its id, 0: not added
+    // The value after each filter of a tile, as it is now (the page watches the tile whose inspector is open). None: no filter, or nothing set yet
+    virtual std::optional<FilterTrace> filterTrace(quint64 id) const { Q_UNUSED(id) return std::nullopt; }
     virtual bool reset(quint64 id) { Q_UNUSED(id) return false; }               // the control's reset button: the parameters it shows go back to their defaults
     // The whole list as it was (undo, redo): its controls, their places and settings. False: this application does not undo the page
     virtual bool restore(const std::vector<Control> &controls) { Q_UNUSED(controls) return false; }
@@ -144,6 +147,8 @@ private:
         quint64 controlsSeen = ~0ull;
         QHash<quint64, std::vector<double>> sent; // the values the client has
         double budget = 300;                   // messages it may still send this second
+        quint64 watching = 0;                  // the tile whose filters it watches (its inspector is open)
+        QByteArray traceSeen;
     };
     struct Attempts {
         int failures = 0;

@@ -509,6 +509,11 @@ void Server::onFrame(Client &c, int opcode, const QByteArray &payload)
             if (type == QLatin1String("undo") ? undo() : redo()) emit layoutEdited();
             return;
         }
+        if (type == QLatin1String("watch")) {
+            c.watching = o.value("id").toString().toULongLong();
+            c.traceSeen.clear();
+            return;
+        }
         if (type == QLatin1String("rel")) {
             released(o.value("id").toString().toULongLong(), o.value("i").toInt(-1));
             return;
@@ -724,6 +729,18 @@ void Server::push()
         }
         if (!changed.isEmpty())
             send(c.socket, websocket::encode(websocket::Text, QJsonDocument(QJsonObject{{"t", "values"}, {"v", changed}}).toJson(QJsonDocument::Compact)));
+        if (c.watching) { // the filters of the tile whose inspector is open: what each one made of the last value
+            const std::optional<FilterTrace> trace = m_backend->filterTrace(c.watching);
+            if (trace) {
+                QJsonArray v;
+                for (double x : trace->stages) v.append(x);
+                const QByteArray json = QJsonDocument(QJsonObject{{"t", "stages"}, {"id", QString::number(c.watching)}, {"in", trace->in}, {"v", v}}).toJson(QJsonDocument::Compact);
+                if (json != c.traceSeen) {
+                    c.traceSeen = json;
+                    send(c.socket, websocket::encode(websocket::Text, json));
+                }
+            }
+        }
     }
 }
 
