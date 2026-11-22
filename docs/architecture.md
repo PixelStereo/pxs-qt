@@ -17,6 +17,12 @@ Also in pxs-core now: the bytes of MIDI channel messages (`pxs::midi::parse` and
 `pxs::core::midi`; the event they fill, `InteractionEvent`, and the ports stay here) and `pxs::core::ChangeFeed`, the portable
 observer of changes (this layer's `ChangeFeed` moves onto it together with the tree).
 
+pxs-core also has the address space itself (`pxs::core::tree`: `Value`, `Parameter`, `Tree`, `Node`, the OSCQuery JSON and the presets), checked
+against this layer's Qt tree by a differential test (`test/tree_differential_test.cpp`) that runs in CI until the Qt tree is replaced:
+this layer keeps its own `pxs::Tree` for now, and `pxs::convert` (QVariant ⇄ Value, QString ⇄ UTF-8, QJson ⇄ JSON text, the OSC
+message ⇄ pxs-core's) is the bridge an application uses while it moves to the portable one. The move is a break of this layer's tree API,
+made when the applications are ready (each pins this layer by commit, so none is forced); see pxs-core's `docs/portable-tree-design.md`.
+
 Still here because their interfaces expose Qt types, so that moving them is a redesign of the API, not an extraction:
 transport (sockets, WebSocket server, mDNS), the tree and parameters (`QVariant`), OSCQuery, this layer's `ChangeFeed`
 (`QString`), the MIDI ports and `InteractionEvent`. A module moves to pxs-core only once its public types are portable.
