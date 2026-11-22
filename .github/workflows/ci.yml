@@ -6,6 +6,13 @@ on:
 permissions:
   contents: read
 jobs:
+  # pxs-core is a submodule of this repository: it is pinned to one of its release tags, which cannot become unreachable.
+  core-pin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: scripts/check-core-pin.sh
+
   test:
     strategy:
       fail-fast: false

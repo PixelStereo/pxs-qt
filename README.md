@@ -24,7 +24,7 @@ That is all it takes for any OSCQuery client to find the app, read its tree, lis
 |---|---|
 | `pxs::params` | how a parameter is declared (type, range, unit, default) and how the others are told it changed |
 | `pxs::tree` | the address space: nodes, parameters, **actions** (received, stateless) and **signals** (emitted, stateless), OSC applied to it, **presets by address** |
-| `pxs::osc` | Qt-facing OSC API; packet encoding, decoding, and pattern matching come from [pxs-core](https://github.com/PixelStereo/pxs-core) |
+| `pxs::osc` | Qt-facing OSC API (and the WebSocket frames); implemented over [pxs-core](https://github.com/PixelStereo/pxs-core) |
 | `pxs::oscquery` | OSCQuery server on the proposal's terms, with WebSocket `LISTEN`, `PATH_ADDED`/`REMOVED`/`CHANGED`, `EXTENDED_TYPE`, `UNIT`, mDNS |
 | `pxs::oscclient` | the other way round: find devices, read their tree, follow their values, write to them |
 

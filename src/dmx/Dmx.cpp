@@ -1,109 +1,59 @@
 #include "pxs/Dmx.h"
 
-#include <QList>
+#include <pxs/core/dmx/frame.h>
 
-#include <cstring>
-
-namespace {
-int u8(const QByteArray &d, int i) { return quint8(d[i]); }
-int be(const QByteArray &d, int i) { return (u8(d, i) << 8) | u8(d, i + 1); }
-void put(QByteArray &d, int i, int v) {
-  d[i] = char(v >> 8);
-  d[i + 1] = char(v);
-}
-bool pdu(const QByteArray &d, int i) {
-  return (u8(d, i) & 0xf0) == 0x70 && (be(d, i) & 0xfff) == d.size() - i;
-}
-} // namespace
 namespace pxs::dmx {
+namespace {
 
-QByteArray encode(const Frame &f) {
-  if (f.universe < (f.sacn ? 1 : 0) || f.universe > (f.sacn ? 63999 : 32767) ||
-      (f.sacn && (f.priority < 0 || f.priority > 200)))
-    return {};
-  int n = qBound(1, f.length, channelCount);
-  if (!f.sacn)
-    n = qMax(2, n + (n & 1)); // Art-Net carries an even number of channels
-  QByteArray values = f.values.left(n);
-  values.resize(n, 0);
-  if (!f.sacn) {
-    QByteArray d(18 + n, 0);
-    d.replace(0, 8, QByteArray("Art-Net\0", 8));
-    d[9] = 0x50;
-    put(d, 10, 14);
-    d[12] = char(f.sequence);
-    d[14] = char(f.universe);
-    d[15] = char(f.universe >> 8);
-    put(d, 16, n);
-    d.replace(18, n, values);
-    return d;
-  }
-  const int total = 126 + n; // the three PDUs' lengths follow from it
-  QByteArray d(total, 0);
-  put(d, 0, 16);
-  d.replace(4, 12, QByteArray("ASC-E1.17\0\0\0", 12));
-  put(d, 16, 0x7000 | (total - 16));
-  d[21] = 4;
-  QByteArray cid = f.cid.left(16);
-  cid.resize(16, 0);
-  d.replace(22, 16, cid);
-  put(d, 38, 0x7000 | (total - 38));
-  d[43] = 2;
-  auto name = f.name.toUtf8().left(63);
-  d.replace(44, name.size(), name);
-  d[108] = char(f.priority);
-  d[111] = char(f.sequence);
-  d[112] = f.terminated ? 0x40 : 0;
-  put(d, 113, f.universe);
-  put(d, 115, 0x7000 | (total - 115));
-  d[117] = 2;
-  d[118] = char(0xa1);
-  put(d, 121, 1);
-  put(d, 123, n + 1);
-  d[125] = char(f.startCode);
-  d.replace(126, n, values);
-  return d;
-}
-bool decode(const QByteArray &d, bool sacn, Frame &f) {
-  f = Frame{};
-  f.sacn = sacn;
-  if (!sacn) {
-    if (d.size() < 18 || std::memcmp(d.constData(), "Art-Net\0", 8) != 0 ||
-        u8(d, 8) != 0 || u8(d, 9) != 0x50 || be(d, 10) < 14)
-      return false;
-    int n = be(d, 16);
-    if (n < 2 || n > 512 || n % 2 || d.size() < 18 + n || u8(d, 15) > 127)
-      return false;
-    f.universe = u8(d, 14) | (u8(d, 15) << 8);
-    f.sequence = u8(d, 12);
-    f.values = d.mid(18, n);
-    f.length = n;
-  } else {
-    if (d.size() < 126 || be(d, 0) != 16 || be(d, 2) != 0 ||
-        std::memcmp(d.constData() + 4, "ASC-E1.17\0\0\0", 12) != 0 ||
-        !pdu(d, 16) || be(d, 18) != 0 || be(d, 20) != 4 || !pdu(d, 38) ||
-        be(d, 40) != 0 || be(d, 42) != 2 || !pdu(d, 115) || u8(d, 117) != 2 ||
-        u8(d, 118) != 0xa1 || be(d, 119) != 0 || be(d, 121) != 1 ||
-        u8(d, 125) != 0)
-      return false;
-    int n = be(d, 123);
-    if (n < 1 || n > 513 || d.size() != 125 + n || be(d, 113) < 1 ||
-        be(d, 113) > 63999 || u8(d, 108) > 200 || be(d, 109) != 0 ||
-        (u8(d, 112) & 0x80))
-      return false;
-    f.universe = be(d, 113);
-    f.priority = u8(d, 108);
-    f.sequence = u8(d, 111);
-    f.terminated = u8(d, 112) & 0x40;
-    f.cid = d.mid(22, 16);
-    f.name = QString::fromUtf8(d.mid(44, 64).split('\0').first());
-    f.values = d.mid(126, n - 1);
-    f.length = n - 1;
-  }
-  f.values.resize(512, 0);
-  return true;
+QByteArray toQt(const std::vector<std::uint8_t> &bytes)
+{
+    return QByteArray(reinterpret_cast<const char *>(bytes.data()), qsizetype(bytes.size()));
 }
 
-QString sacnGroup(int universe) { return QStringLiteral("239.255.%1.%2").arg(universe >> 8).arg(universe & 255); }
+std::vector<std::uint8_t> fromQt(const QByteArray &bytes)
+{
+    const auto *first = reinterpret_cast<const std::uint8_t *>(bytes.constData());
+    return std::vector<std::uint8_t>(first, first + bytes.size());
+}
+
+} // namespace
+
+QByteArray encode(const Frame &f)
+{
+    core::dmx::Frame core;
+    core.sacn = f.sacn;
+    core.universe = f.universe;
+    core.priority = f.priority;
+    core.sequence = f.sequence;
+    core.cid = fromQt(f.cid);
+    core.values = fromQt(f.values);
+    core.length = f.length;
+    core.startCode = f.startCode;
+    const QByteArray name = f.name.toUtf8();
+    core.name.assign(name.constData(), std::size_t(name.size()));
+    core.terminated = f.terminated;
+    return toQt(core::dmx::encode(core));
+}
+
+bool decode(const QByteArray &d, bool sacn, Frame &f)
+{
+    core::dmx::Frame core;
+    const bool ok = core::dmx::decode(reinterpret_cast<const std::uint8_t *>(d.constData()), std::size_t(d.size()), sacn, core);
+    f = Frame{};
+    f.sacn = sacn;
+    if (!ok) return false;
+    f.universe = core.universe;
+    f.priority = core.priority;
+    f.sequence = core.sequence;
+    f.cid = toQt(core.cid);
+    f.values = toQt(core.values);
+    f.length = core.length;
+    f.startCode = core.startCode;
+    f.name = QString::fromUtf8(core.name.data(), qsizetype(core.name.size()));
+    f.terminated = core.terminated;
+    return true;
+}
+
+QString sacnGroup(int universe) { return QString::fromStdString(core::dmx::sacnGroup(universe)); }
 
 } // namespace pxs::dmx

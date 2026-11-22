@@ -1,9 +1,26 @@
 # Common architecture: the tree, the leaves, the mappings
 
-The portable OSC packet codec and address-pattern matcher are being extracted to [`pxs-core`](https://github.com/PixelStereo/pxs-core). The Qt-facing
-API and all Qt networking and UI modules remain in [`pxs-qt`](https://github.com/PixelStereo/pxs-qt). The extraction
-keeps the existing `osc::Message` API as an adapter, so desktop applications continue to use their current targets while
-portable clients can link `pxs-core::osc` directly. Further modules move only after their public types no longer expose Qt.
+## Layers: pxs-core and pxs-qt
+
+The wire formats live in [`pxs-core`](https://github.com/PixelStereo/pxs-core), a C++17 library with no Qt (submodule
+`third_party/pxs-core`): OSC packets, address patterns and address-segment names, Art-Net/sACN frames, WebSocket frames and
+the handshake key. They are pure functions of their input, bounded against hostile packets, and verified by golden vectors,
+a hostile-input corpus under the sanitizers and fuzzing. A tool without Qt links `pxs-core::osc`, `pxs-core::dmx` or
+`pxs-core::websocket` directly.
+
+This repository keeps everything that needs Qt, and the Qt-facing API of those formats (`osc::Message`, `pxs::dmx::Frame`,
+`pxs::websocket::decode`, …): each is an **adapter** that converts `QString`/`QByteArray`/`QVariant` at the boundary and
+calls pxs-core. No pxs-core type or header appears in a pxs-qt header, so applications did not change, and there is one
+implementation of each format.
+
+Still here because their interfaces expose Qt types, so that moving them is a redesign of the API, not an extraction:
+transport (sockets, WebSocket server, mDNS), the tree and parameters, OSCQuery, `ChangeFeed`, and MIDI (`parse()` fills an
+`InteractionEvent`). A module moves to pxs-core only once its public types are portable.
+
+**Versions.** pxs-core is pinned by release tag (`scripts/check-core-pin.sh`, run by CI, refuses anything else), so a
+commit that is not on pxs-core's `main` can never be pinned and become unreachable. Clone with
+`git clone --recurse-submodules`; `git submodule update --init --recursive` fetches both levels (`submodules: recursive` in a
+workflow). To move to a new pxs-core: see its `RELEASING.md`.
 
 This document fixes what every Pixel Stereo application has in common to expose and drive its settings. It serves as a
 contract: an application, a parameter list, a menu or a mapping behaves the same way everywhere. Points marked **to be
