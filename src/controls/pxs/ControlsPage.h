@@ -730,15 +730,23 @@ inline constexpr char kScriptE[] = R"JS(
   function targetEditor(sh, c, numeric) {
     sh.appendChild(el('label', '', 'Sends to'));
     const rows = c.targets.map((t, i) => ({ i, min: t.min, max: t.max, curve: t.curve, axis: t.axis }));
-    const send2 = () => push({ targets: rows });
-    const box = el('div');
+    let fb = c.feedback == null ? -1 : c.feedback; // which target gives the value the tile shows (as the targets are numbered now)
+    const send2 = () => push({ targets: rows, feedback: fb });
+    const fbBox = el('div'), box = el('div');
     const draw = () => {
-      box.textContent = '';
+      box.textContent = ''; fbBox.textContent = '';
+      if (rows.length > 1 || c.feedback >= 0) { // several messages: which one gives the feedback
+        fbBox.appendChild(el('label', '', 'Feedback from'));
+        const fs = el('select'); fs.appendChild(Object.assign(el('option', '', 'None: the tile keeps its own value'), { value: -1 }));
+        rows.forEach(r => { const t = c.targets[r.i]; fs.appendChild(Object.assign(el('option', '', t.label || t.path), { value: r.i })); });
+        fs.value = rows.some(r => r.i === fb) ? fb : -1; fs.onchange = () => { fb = Number(fs.value); send2(); };
+        fbBox.appendChild(fs); fbBox.appendChild(el('div', 'hint', 'The tile shows what comes back from this one, taken back through its range and curve.'));
+      }
       rows.forEach((r, k) => {
         const t = c.targets[r.i], line = el('div'); line.style.cssText = 'border:1px solid var(--line);border-radius:9px;padding:8px;margin:0 0 8px';
         const head = el('div'); head.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:6px';
         const nm = el('span', '', t.label || t.path); nm.title = t.path; nm.style.cssText = 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px';
-        const del = el('button', 'hb', '✕'); del.title = 'Stop sending to this one'; del.onclick = () => { rows.splice(k, 1); send2(); draw(); };
+        const del = el('button', 'hb', '✕'); del.title = 'Stop sending to this one'; del.onclick = () => { if (fb === r.i) fb = -1; rows.splice(k, 1); send2(); draw(); };
         head.appendChild(nm); head.appendChild(del); line.appendChild(head);
         const fields = el('div', 'row');
         [['min', 'From'], ['max', 'To'], ['curve', 'Curve']].forEach(f => {
@@ -754,7 +762,7 @@ inline constexpr char kScriptE[] = R"JS(
       });
       if (!rows.length) box.appendChild(el('div', 'hint', 'Nothing left to send to: drag an address onto this tile to add one.'));
     };
-    draw(); sh.appendChild(box);
+    draw(); sh.appendChild(fbBox); sh.appendChild(box);
     sh.appendChild(el('div', 'hint', 'Drag an address from the tree onto this tile to send to it too. A curve above 1 is fine at the low end.'));
   }
   const selIds = () => Array.from(sel).filter(k => byId[k]);

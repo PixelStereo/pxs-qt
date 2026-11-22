@@ -79,6 +79,8 @@ std::optional<Control> forParameter(const ParameterSource &source, quint64 scope
 std::optional<Control> forParameters(const ParameterSource &source, quint64 scope, const QString &pathX, const QString &pathY, quint64 group);
 bool setBoundPoints(const Control &c, ParameterSource &source, const std::vector<double> &xy); // a Points control: each ball's two parameters
 bool setBoundPoint(const Control &c, ParameterSource &source, double x, double y); // a pad's two parameters
+// A macro whose feedback is one of its targets: its value is what that target holds, taken back through the target's range and curve
+void fillFeedback(Control &c, const ParameterSource &source);
 void fillBound(Control &c, const ParameterSource &source);                  // its value, range, step and choices, now
 bool setBound(const Control &c, ParameterSource &source, double value);      // the parameter is what is set
 // A macro's value (a Slider, a Toggle, a Button, or one axis of a Pad), sent to each target of that axis through its curve into its range. A button sends

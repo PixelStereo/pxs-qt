@@ -62,6 +62,28 @@ int main()
     b.applyProps(QJsonObject{{"filters", QJsonArray{stage("clamp", 0, 1)}}});
     check(b.filters.isEmpty(), "a button does not");
 
+    // Feedback: the target that gives the value the tile shows, kept through removals
+    {
+        Control m;
+        m.kind = Control::Kind::Slider;
+        for (const char *path : {"/a", "/b", "/c"}) {
+            pxs::controls::Target n;
+            n.path = path;
+            m.targets.push_back(n);
+        }
+        check(m.feedback == -1, "no feedback to begin with");
+        m.applyProps(QJsonObject{{"feedback", 2}});
+        check(m.feedback == 2 && Control::fromJson(m.toJson()).feedback == 2 && m.wireJson().value("feedback").toInt() == 2, "a target gives the feedback, kept through JSON");
+        m.applyProps(QJsonObject{{"feedback", 9}});
+        check(m.feedback == -1, "one that is not there: none");
+        m.applyProps(QJsonObject{{"feedback", 2}});
+        // the first target removed: the feedback is the same one, now second
+        m.applyProps(QJsonObject{{"targets", QJsonArray{QJsonObject{{"i", 1}}, QJsonObject{{"i", 2}}}}});
+        check(m.targets.size() == 2 && m.feedback == 1 && m.targets[1].path == "/c", "the feedback follows its target");
+        m.applyProps(QJsonObject{{"targets", QJsonArray{QJsonObject{{"i", 0}}}}, {"feedback", 1}});
+        check(m.targets.size() == 1 && m.feedback == -1, "its target removed: none");
+    }
+
     // The chain, at once
     FilterRunner run;
     const QJsonArray clamp{stage("clamp", 0.2, 0.8)};

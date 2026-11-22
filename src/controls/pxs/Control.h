@@ -122,6 +122,7 @@ struct Control {
     // A macro: a Slider, a Toggle, a Button or a Pad that has a value of its own and sends it to several parameters, each in its own range and
     // with its own curve. Not a view: nothing is read back from the parameters
     std::vector<Target> targets;
+    int feedback = -1; // a macro: which of its targets gives the value the tile shows (the application reads it back); -1: none, the tile keeps its own
     static constexpr int kTargetsMax = 32;
     // A view of a parameter: where it is (the application's own scope: a layer in NyxMap, a device in an explorer; 0: the application's
     // own) and its address there. The control has no value of its own: it shows the parameter and sets it, so that a change made anywhere
@@ -273,6 +274,7 @@ struct Control {
             for (const Target &t : targets)
                 list.append(QJsonObject{{"scope", QString::number(t.scope)}, {"path", t.path}, {"min", t.outMin}, {"max", t.outMax}, {"curve", t.curve}, {"axis", t.axis}});
             o["targets"] = list;
+            if (feedback >= 0) o["feedback"] = feedback;
         }
         if (!widget.isEmpty()) o["widget"] = widget;
         if (!accent.isEmpty()) o["accent"] = accent;
@@ -356,6 +358,7 @@ struct Control {
         if (physical() && p.value("physics").isObject()) physics.apply(p.value("physics").toObject());
         if (!targets.empty() && p.value("targets").isArray()) { // by position: its range, its curve, its axis; one that is left out is removed
             std::vector<Target> next;
+            std::vector<int> kept; // the positions they had
             for (const QJsonValue &v : p.value("targets").toArray()) {
                 const QJsonObject t = v.toObject();
                 const int i = t.value("i").toInt(-1);
@@ -369,8 +372,18 @@ struct Control {
                 num("curve", 0.1, 10, n.curve);
                 if (t.value("axis").isDouble()) n.axis = t.value("axis").toInt() == 1 ? 1 : 0;
                 next.push_back(std::move(n));
+                kept.push_back(i);
             }
+            const int was = p.value("feedback").isDouble() ? p.value("feedback").toInt(-1) : feedback; // as the targets were numbered before
+            int fb = -1;
+            for (size_t k = 0; k < kept.size(); ++k)
+                if (kept[k] == was) fb = int(k);
             targets = std::move(next);
+            feedback = fb; // the same target, wherever it is now (-1: it was removed)
+        }
+        if (p.value("feedback").isDouble() && !p.value("targets").isArray() && !targets.empty()) {
+            const int f = p.value("feedback").toInt(-1);
+            feedback = f >= 0 && size_t(f) < targets.size() ? f : -1;
         }
         if (kind == Kind::Adsr) {
             number("max", max);
@@ -430,6 +443,7 @@ struct Control {
             for (const Target &t : targets)
                 list.append(QJsonObject{{"path", t.path}, {"label", t.label}, {"min", t.outMin}, {"max", t.outMax}, {"curve", t.curve}, {"axis", t.axis}});
             o["targets"] = list;
+            if (feedback >= 0) o["feedback"] = feedback;
         }
         if (!widget.isEmpty()) o["widget"] = widget;
         if (!accent.isEmpty()) o["accent"] = accent;
@@ -532,6 +546,7 @@ struct Control {
             n.axis = t.value("axis").toInt(0) == 1 ? 1 : 0;
             c.targets.push_back(std::move(n));
         }
+        if (const int f = o.value("feedback").toInt(-1); f >= 0 && size_t(f) < c.targets.size()) c.feedback = f;
         if (const QJsonObject po = o.value("physicsOf").toObject(); !po.isEmpty()) {
             c.physTarget = po.value("id").toString().toULongLong();
             c.physKey = po.value("key").toString().left(24);

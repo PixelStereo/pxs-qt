@@ -487,6 +487,27 @@ bool setBoundPoint(const Control &c, ParameterSource &source, double x, double y
     return any;
 }
 
+void fillFeedback(Control &c, const ParameterSource &source)
+{
+    if (c.feedback < 0 || size_t(c.feedback) >= c.targets.size()) return;
+    const Target &t = c.targets[size_t(c.feedback)];
+    ParamInfo info;
+    const QJsonValue v = source.value(t.scope, t.path);
+    if (v.isUndefined() || v.isNull() || !source.info(t.scope, t.path, &info)) return;
+    double out;
+    if (v.isBool()) out = v.toBool() ? 1.0 : 0.0;
+    else if (v.isDouble()) out = v.toDouble();
+    else return; // a choice or a text: no number to show
+    const double range = t.outMax - t.outMin;
+    const double shaped = std::clamp(std::abs(range) > 1e-12 ? (out - t.outMin) / range : 0.0, 0.0, 1.0);
+    const double n = std::pow(shaped, 1.0 / (t.curve > 0 ? t.curve : 1.0)); // the way back of what setTargets does
+    const double span = c.max - c.min;
+    const double shown = c.min + n * span;
+    if (c.kind == Kind::Pad && t.axis == 1) c.value2 = std::clamp(shown, std::min(c.min, c.max), std::max(c.min, c.max));
+    else if (c.kind == Kind::Toggle || c.kind == Kind::Button) c.value = n >= 0.5 ? 1.0 : 0.0;
+    else c.value = std::clamp(shown, std::min(c.min, c.max), std::max(c.min, c.max));
+}
+
 void fillBound(Control &c, const ParameterSource &source)
 {
     if (c.kind == Kind::Points && c.boundScope) { // the points are where the parameters are
