@@ -165,7 +165,7 @@ inline constexpr char kScriptA[] = R"JS(
   const sv = (tag, attrs, parent) => { const e = document.createElementNS(NS, tag); for (const k in attrs || {}) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; };
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
   let pin = new URLSearchParams(location.search).get('pin') || sessionStorage.getItem('nyxmap-pin') || '', needPin = true;
-  let busyAt = 0, ws = null, opened = false, failures = 0, controls = [], sizes = {}, inspectorMode = 'always', nameParts = 2, sharedPage = false, sel = new Set(), values = {}, byId = {}, pageId = -1, editing = false, busy = 0, again = false, sheetId = 0;
+  let filterCat = null, busyAt = 0, ws = null, opened = false, failures = 0, controls = [], sizes = {}, inspectorMode = 'always', nameParts = 2, sharedPage = false, sel = new Set(), values = {}, byId = {}, pageId = -1, editing = false, busy = 0, again = false, sheetId = 0;
   const active = new Set(), sendAt = {}, tiles = {};
   const state = (text, cls) => { const s = $('#state'); s.textContent = text; s.className = cls || ''; };
   const send = obj => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj)); };
@@ -232,7 +232,7 @@ inline constexpr char kScriptA[] = R"JS(
     ws.onmessage = e => {
       let m; try { m = JSON.parse(e.data); } catch (_) { return; }
       if (m.t === 'controls') {
-        controls = m.list || []; sizes = m.sizes || {}; inspectorMode = m.inspector === 'onDemand' ? 'onDemand' : 'always'; nameParts = Math.max(1, Math.min(4, m.nameParts | 0 || 2)); if (!editing) document.body.classList.remove('insp'); byId = {}; $('#title').textContent = m.title || 'Controls'; $('#toShow').hidden = !m.show;
+        controls = m.list || []; if (m.filters) filterCat = m.filters; sizes = m.sizes || {}; inspectorMode = m.inspector === 'onDemand' ? 'onDemand' : 'always'; nameParts = Math.max(1, Math.min(4, m.nameParts | 0 || 2)); if (!editing) document.body.classList.remove('insp'); byId = {}; $('#title').textContent = m.title || 'Controls'; $('#toShow').hidden = !m.show;
         controls.forEach(c => { byId[c.id] = c; values[c.id] = c.kind === 'color' ? c.rgb : c.kind === 'pad' ? [c.x, c.y] : c.kind === 'adsr' ? c.adsr : c.kind === 'multi' ? c.values : c.kind === 'points' ? [].concat.apply([], c.points) : c.value; });
         sharedPage = !!m.sharedPage; if (sharedPage && m.page) showPageId(m.page, false);
         if (busy && Date.now() - busyAt < 4000) again = true; else { busy = 0; render(); } // a gesture that never ended must not freeze the page
@@ -702,6 +702,7 @@ inline constexpr char kScriptD[] = R"JS(
     if (c.targets && c.targets.length) targetEditor(sh, c, numeric);
     if (c.kind === 'points' && c.balls && c.balls.length) ballEditor(sh, c, field, text, numeric);
     else if (c.physics) physFields(sh, c.physics, ph => push({ physics: ph }), key => { flush(); send({ t: 'physicsWidget', id: c.id, key }); });
+    if ((c.kind === 'slider' || c.kind === 'toggle') && !c.physTarget && !c.signal && filterCat) filterEditor(sh, c);
     const del = el('button', 'del', 'Delete this control'); del.onclick = () => { send({ t: 'remove', id: c.id }); sheetId = 0; };
     sh.appendChild(del);
     sh.classList.add('open'); sh.classList.toggle('pinned', inspectorMode === 'always');
@@ -793,5 +794,66 @@ inline constexpr char kScriptE[] = R"JS(
 )JS";
 
 inline QByteArray style() { return QByteArray(kStyleA) + kStyleB; }
-inline QByteArray script() { return QByteArray(kScriptA) + kScriptB + kScriptB2 + kScriptC + kScriptD + kScriptE; }
+// The filters of a tile: what it sends goes through them in their order (the interaction filters of pxs), each with its own settings
+inline constexpr char kScriptF[] = R"JS(
+  function filterEditor(sh, c) {
+    const cat = filterCat, by = {}; cat.filters.forEach(f => { by[f.key] = f; });
+    let stages = (c.filters || []).map(s => Object.assign({}, s));
+    const save = () => push({ filters: stages });
+    sh.appendChild(el('label', '', 'Filters'));
+    const box = el('div'), pad = 'border:1px solid var(--line);border-radius:9px;padding:8px;margin:0 0 8px';
+    const stageSettings = (s, f, card) => {
+      let row = null;
+      f.settings.forEach((st, n) => {
+        if (n % 2 === 0) { row = el('div', 'row'); card.appendChild(row); }
+        const d = el('div'); d.appendChild(el('label', '', st.name + (st.suffix ? ' (' + st.suffix + ')' : '')));
+        const i = el('input'); i.type = 'number'; i.step = 'any'; i.inputMode = 'decimal'; i.min = st.min; i.max = st.max; i.value = s[st.id] != null ? s[st.id] : st.def;
+        i.onchange = () => { if (i.value !== '' && isFinite(Number(i.value))) { s[st.id] = Math.max(st.min, Math.min(st.max, Number(i.value))); i.value = s[st.id]; save(); } };
+        d.appendChild(i); row.appendChild(d);
+      });
+    };
+    const draw = () => {
+      box.textContent = '';
+      stages.forEach((s, k) => {
+        const f = by[s.type]; if (!f) return;
+        const card = el('div'); card.style.cssText = pad + (s.enabled === false ? ';opacity:.55' : '');
+        const head = el('div'); head.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:4px';
+        const on = el('input'); on.type = 'checkbox'; on.checked = s.enabled !== false; on.title = 'On / off'; on.onchange = () => { s.enabled = on.checked; save(); draw(); };
+        const nm = el('b', '', f.name); nm.style.cssText = 'flex:1;font-size:13px';
+        const mv = (d) => () => { const j = k + d; if (j < 0 || j >= stages.length) return; const t = stages[k]; stages[k] = stages[j]; stages[j] = t; save(); draw(); };
+        const up = el('button', 'hb', '▲'), dn = el('button', 'hb', '▼'), del = el('button', 'hb', '✕');
+        up.title = 'Earlier'; dn.title = 'Later'; del.title = 'Remove this filter';
+        up.onclick = mv(-1); dn.onclick = mv(1); del.onclick = () => { stages.splice(k, 1); save(); draw(); };
+        [on, nm, up, dn, del].forEach(x => head.appendChild(x)); card.appendChild(head);
+        card.appendChild(el('div', 'hint', f.about));
+        if (s.type === 'math') {
+          const sel = el('select'); cat.ops.forEach(o => sel.appendChild(Object.assign(el('option', '', o.name), { value: o.key }))); sel.value = s.op || 'multiply';
+          sel.onchange = () => { s.op = sel.value; save(); draw(); }; card.appendChild(el('label', '', 'Operation')); card.appendChild(sel);
+          const o = cat.ops.find(q => q.key === sel.value); if (o && !o.value) { /* no value: Abs, Floor… */ } else stageSettings(s, f, card);
+        } else if (s.type === 'curve') {
+          const sel = el('select'); cat.curves.forEach((q, i) => sel.appendChild(Object.assign(el('option', '', q.name), { value: i })));
+          const cur = cat.curves.findIndex(q => JSON.stringify(q.curve) === JSON.stringify(s.curve)); const extra = el('option', '', 'Custom'); extra.value = -1; if (cur < 0) sel.appendChild(extra); sel.value = cur;
+          sel.onchange = () => { if (Number(sel.value) >= 0) { s.curve = cat.curves[Number(sel.value)].curve; save(); } }; card.appendChild(el('label', '', 'Shape')); card.appendChild(sel);
+        } else stageSettings(s, f, card);
+        box.appendChild(card);
+      });
+      if (!stages.length) box.appendChild(el('div', 'hint', 'None: the tile sends what you set.'));
+    };
+    draw(); sh.appendChild(box);
+    if (stages.length >= cat.max) { sh.appendChild(el('div', 'hint', 'At most ' + cat.max + ' filters on a tile.')); } else {
+      const add = el('select'); add.appendChild(Object.assign(el('option', '', '+ Add a filter…'), { value: '' }));
+      const groups = {}; cat.filters.forEach(f => { (groups[f.group] = groups[f.group] || []).push(f); });
+      Object.keys(groups).forEach(g => { const og = el('optgroup'); og.label = g; groups[g].forEach(f => og.appendChild(Object.assign(el('option', '', f.name), { value: f.key }))); add.appendChild(og); });
+      add.onchange = () => {
+        const f = by[add.value]; if (!f) return; const s = { type: f.key }; f.settings.forEach(st => { s[st.id] = st.def; });
+        if (f.key === 'curve') s.curve = cat.curves[0].curve; if (f.key === 'math') s.op = 'multiply';
+        stages.push(s); save(); add.value = ''; draw();
+      };
+      sh.appendChild(add);
+    }
+    sh.appendChild(el('div', 'hint', 'In this order, on what this tile sends (0 to 1 of its range). A smoothing goes on after you let go.'));
+  }
+)JS";
+
+inline QByteArray script() { return QByteArray(kScriptA) + kScriptB + kScriptB2 + kScriptC + kScriptD + kScriptE + kScriptF; }
 } // namespace pxs::controls::page

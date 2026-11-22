@@ -1,0 +1,94 @@
+// The filters of a tile: what an editor sends is made valid, the catalog the page draws, the chain on a value (at once, and over time).
+#include <pxs/Control.h>
+#include <pxs/Filters.h>
+
+#include <cmath>
+#include <cstdio>
+
+using pxs::controls::Control;
+using namespace pxs::controls;
+
+static int failures = 0;
+static void check(bool ok, const char *what)
+{
+    if (ok) return;
+    std::printf("FAIL filters: %s\n", what);
+    ++failures;
+}
+
+static QJsonObject stage(const char *type, double a = 0, double b = 0, bool on = true)
+{
+    QJsonObject o{{"type", type}, {"a", a}, {"b", b}};
+    if (!on) o["enabled"] = false;
+    return o;
+}
+
+int main()
+{
+    // The catalog: every filter, with its settings, and the operations and curves
+    const QJsonObject cat = filterCatalog();
+    check(cat.value("filters").toArray().size() == kInteractionFilterCount, "the catalog has every filter");
+    check(cat.value("ops").toArray().size() == kMathOpCount && cat.value("curves").toArray().size() >= 6, "the operations and curves are there");
+    for (const QJsonValue &v : cat.value("filters").toArray()) {
+        bool ok = false;
+        interactionFilterFromKey(v.toObject().value("key").toString(), &ok);
+        check(ok && !v.toObject().value("name").toString().isEmpty() && !v.toObject().value("about").toString().isEmpty() && !v.toObject().value("group").toString().isEmpty(), "a filter of the catalog is known and described");
+    }
+
+    // Made valid: settings in range, a few stages, a curve kept
+    QJsonArray many;
+    for (int i = 0; i < 20; ++i) many.append(stage("clamp", -5, 99));
+    const QJsonArray clean = cleanFilters(many);
+    check(clean.size() == kFiltersMax, "at most a few filters on a tile");
+    check(clean[0].toObject().value("a").toDouble() == 0 && clean[0].toObject().value("b").toDouble() == 1, "a setting is kept within its range");
+    const QJsonValue curve = cat.value("curves").toArray()[1].toObject().value("curve");
+    QJsonObject withCurve{{"type", "curve"}, {"curve", curve}};
+    check(cleanFilters(QJsonArray{withCurve})[0].toObject().value("curve") == curve, "a curve survives cleaning");
+    check(anyFilterOn(clean) && !anyFilterOn(QJsonArray{stage("clamp", 0, 1, false)}) && !anyFilterOn({}), "on or off");
+
+    // On a control: kept in its JSON, edited by props, for a slider and a switch only
+    Control s;
+    s.kind = Control::Kind::Slider;
+    s.applyProps(QJsonObject{{"filters", QJsonArray{stage("clamp", 0.2, 0.8)}}});
+    check(s.filters.size() == 1 && Control::fromJson(s.toJson()).filters == s.filters && s.wireJson().value("filters").toArray() == s.filters, "a slider keeps its filters through JSON");
+    s.applyProps(QJsonObject{{"filters", QJsonArray{}}});
+    check(s.filters.isEmpty() && !s.toJson().contains("filters"), "no filter: nothing in the JSON");
+    Control t;
+    t.kind = Control::Kind::Toggle;
+    t.applyProps(QJsonObject{{"filters", QJsonArray{stage("hold", 0.5)}}});
+    check(t.filters.size() == 1, "a switch takes filters");
+    Control b;
+    b.kind = Control::Kind::Button;
+    b.applyProps(QJsonObject{{"filters", QJsonArray{stage("clamp", 0, 1)}}});
+    check(b.filters.isEmpty(), "a button does not");
+
+    // The chain, at once
+    FilterRunner run;
+    const QJsonArray clamp{stage("clamp", 0.2, 0.8)};
+    check(run.input(1, clamp, 1.0).value_or(-1) == 0.8 && run.input(1, clamp, 0.0).value_or(-1) == 0.2, "a clamp acts at once");
+    check(!run.active(), "and nothing goes on after it");
+    check(run.input(2, QJsonArray{stage("clamp", 0.2, 0.8, false)}, 1.0).value_or(-1) == 1.0, "a stage that is off lets it through");
+    check(!run.input(3, clamp, std::nan("")).has_value(), "no number, nothing");
+
+    // Over time: a smoothing starts where the value is, then follows it, and stops when it got there
+    FilterRunner slow;
+    const QJsonArray smooth{stage("weighted_average", 0.3)};
+    check(slow.input(9, smooth, 0.0).value_or(-1) == 0.0, "a smoothing starts where the value is");
+    slow.input(9, smooth, 1.0);
+    check(slow.active(), "a smoothing goes on by itself");
+    double last = 0;
+    int frames = 0;
+    for (; frames < 1000 && slow.active(); ++frames) {
+        for (const auto &m : slow.step(0.016)) {
+            check(m.first == 9 && m.second >= last - 1e-9, "it rises");
+            last = m.second;
+        }
+    }
+    check(last > 0.99 && frames < 1000, "it gets there, and then it is still");
+    check(!slow.active(), "and stops");
+    slow.forget(9);
+    check(slow.step(0.016).empty(), "a tile forgotten");
+
+    if (!failures) std::printf("filters: OK\n");
+    return failures;
+}

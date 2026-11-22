@@ -18,6 +18,9 @@
 
 namespace pxs::controls {
 
+QJsonArray cleanFilters(const QJsonArray &filters); // Filters.h: every stage valid, its settings in range, a few of them
+
+
 // What moves a control's numbers (Server.h runs it), as in Lemur: Interpolate (the value glides to where the hand is) or Mass-Spring (it is
 // attracted to the finger and, when the finger lets go, goes on with the push it gave: thrown, it bounces on the walls; with a tension, it is
 // pulled to where the finger last was and settles there after some bounces: friction slows it, the walls bounce it). All of it in the 0..1 of each number's range
@@ -113,6 +116,8 @@ struct Control {
     // of its gesture (a Slider: 1 linear, above 1 fine at the low end, below 1 fine at the high end) and its accent color ("#rrggbb")
     QString widget, accent;
     double curve = 1;
+    // The filters of what a Slider or a Toggle sends (Filters.h): the stages of an interaction's chain, as JSON, in their order. Empty: none
+    QJsonArray filters;
     Physics physics; // Slider, Pad, Multi: what moves its numbers (a Points control has one for each ball)
     // A macro: a Slider, a Toggle, a Button or a Pad that has a value of its own and sends it to several parameters, each in its own range and
     // with its own curve. Not a view: nothing is read back from the parameters
@@ -272,6 +277,7 @@ struct Control {
         if (!widget.isEmpty()) o["widget"] = widget;
         if (!accent.isEmpty()) o["accent"] = accent;
         if (curve != 1) o["curve"] = curve;
+        if (!filters.isEmpty()) o["filters"] = filters;
         if (physical()) o["physics"] = physics.toJson();
         if (gw > 0 && gh > 0) o["layout"] = QJsonObject{{"x", gx}, {"y", gy}, {"w", gw}, {"h", gh}};
         switch (kind) {
@@ -346,6 +352,7 @@ struct Control {
         if (p.value("name").isString()) name = p.value("name").toString().left(60);
         if (p.contains("widget")) widget = cleanWidget(p.value("widget").toString());
         if (p.contains("accent")) accent = cleanAccent(p.value("accent").toString());
+        if (p.value("filters").isArray() && (kind == Kind::Slider || kind == Kind::Toggle)) filters = cleanFilters(p.value("filters").toArray());
         if (physical() && p.value("physics").isObject()) physics.apply(p.value("physics").toObject());
         if (!targets.empty() && p.value("targets").isArray()) { // by position: its range, its curve, its axis; one that is left out is removed
             std::vector<Target> next;
@@ -427,6 +434,7 @@ struct Control {
         if (!widget.isEmpty()) o["widget"] = widget;
         if (!accent.isEmpty()) o["accent"] = accent;
         if (curve != 1) o["curve"] = curve;
+        if (!filters.isEmpty()) o["filters"] = filters;
         if (physical()) o["physics"] = physics.toJson();
         if (gw > 0 && gh > 0) o["layout"] = QJsonObject{{"x", gx}, {"y", gy}, {"w", gw}, {"h", gh}};
         switch (kind) {
@@ -531,6 +539,7 @@ struct Control {
         }
         c.widget = cleanWidget(o.value("widget").toString());
         c.accent = cleanAccent(o.value("accent").toString());
+        if (c.kind == Kind::Slider || c.kind == Kind::Toggle) c.filters = cleanFilters(o.value("filters").toArray());
         c.curve = std::isfinite(o.value("curve").toDouble(1)) ? std::clamp(o.value("curve").toDouble(1), 0.1, 10.0) : 1.0;
         if (const QJsonObject ph = o.value("physics").toObject(); !ph.isEmpty()) c.physics.apply(ph);
         if (const QJsonObject l = o.value("layout").toObject(); l.value("w").toInt() > 0 && l.value("h").toInt() > 0) {
