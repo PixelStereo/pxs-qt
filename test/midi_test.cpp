@@ -40,6 +40,13 @@ int main(int argc, char **argv)
         CHECK(high[0] == 0xBF && high[1] == 127 && high[2] == 127);
     }
 
+    // A value that is not a number is 0, one beyond the range is held (what is sent never leaves MIDI's range)
+    {
+        const double nan = std::nan(""), inf = HUGE_VAL;
+        CHECK(controlChange(1, 7, nan)[2] == 0 && controlChange(1, 7, inf)[2] == 127 && controlChange(1, 7, -inf)[2] == 0);
+        CHECK(pitchBend(1, nan)[1] == 0 && pitchBend(1, nan)[2] == 0 && pitchBend(1, inf)[1] == 127 && pitchBend(1, inf)[2] == 127);
+    }
+
     // Not DMX-like noise: clock, SysEx, aftertouch, short messages
     {
         InteractionEvent e;

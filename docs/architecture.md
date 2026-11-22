@@ -13,9 +13,13 @@ This repository keeps everything that needs Qt, and the Qt-facing API of those f
 calls pxs-core. No pxs-core type or header appears in a pxs-qt header, so applications did not change, and there is one
 implementation of each format.
 
+Also in pxs-core now: the bytes of MIDI channel messages (`pxs::midi::parse` and the builders are adapters over
+`pxs::core::midi`; the event they fill, `InteractionEvent`, and the ports stay here) and `pxs::core::ChangeFeed`, the portable
+observer of changes (this layer's `ChangeFeed` moves onto it together with the tree).
+
 Still here because their interfaces expose Qt types, so that moving them is a redesign of the API, not an extraction:
-transport (sockets, WebSocket server, mDNS), the tree and parameters, OSCQuery, `ChangeFeed`, and MIDI (`parse()` fills an
-`InteractionEvent`). A module moves to pxs-core only once its public types are portable.
+transport (sockets, WebSocket server, mDNS), the tree and parameters (`QVariant`), OSCQuery, this layer's `ChangeFeed`
+(`QString`), the MIDI ports and `InteractionEvent`. A module moves to pxs-core only once its public types are portable.
 
 **Versions.** pxs-core is pinned by release tag (`scripts/check-core-pin.sh`, run by CI, refuses anything else), so a
 commit that is not on pxs-core's `main` can never be pinned and become unreachable. Clone with
