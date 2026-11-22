@@ -7,7 +7,7 @@
 #   permissions: { contents: write }
 #   jobs:
 #     update:
-#       uses: PixelStereo/pxs/.github/workflows/release-downloads.yml@v0.12.1
+#       uses: PixelStereo/pxs-qt/.github/workflows/release-downloads.yml@v0.12.1
 #       with: { app: MpOsc, platforms: "mac,win", pxs-ref: v0.12.1 }
 name: Release downloads
 
@@ -48,7 +48,7 @@ jobs:
           ref: ${{ github.event.repository.default_branch }}
       - uses: actions/checkout@v4
         with:
-          repository: PixelStereo/pxs
+          repository: PixelStereo/pxs-qt
           ref: ${{ inputs.pxs-ref }}
           path: .pxs-ci
           persist-credentials: false
