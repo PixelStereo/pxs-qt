@@ -39,6 +39,7 @@ header h1 { flex:1; margin:0 10px 0 0; font-size:16px; font-weight:600; white-sp
 .hd { display:flex; justify-content:space-between; align-items:baseline; font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--dim); white-space:nowrap; }
 .tile .face .hd span:first-child { font-size:15px; text-transform:none; letter-spacing:0; color:var(--text); font-weight:600; }
 .face.sig { outline:1px dashed var(--acc); outline-offset:-4px; }
+.face.sig .bd, .face.ro .bd { pointer-events:none; } /* what it only shows cannot be moved, whatever its widget */
 .sigtag { font-size:8px; letter-spacing:.08em; color:var(--acc); border:1px solid var(--acc); border-radius:4px; padding:0 4px; margin-left:6px; opacity:.85; font-weight:600; }
 .dest { font-size:9px; line-height:1.25; color:var(--dim); opacity:.8; overflow:hidden; word-break:break-all; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; font-family:ui-monospace,Menlo,monospace; }
 .hd span { overflow:hidden; text-overflow:ellipsis; }
@@ -349,10 +350,18 @@ inline constexpr char kScriptB2[] = R"JS(
   function meter(c, vertical) {
     const root = el('div', 'meter' + (vertical ? ' v' : '')), fill = el('div', 'mfill'), peak = el('div', 'mpeak'), span = (c.max - c.min) || 1;
     root.appendChild(fill); root.appendChild(peak);
-    let pk = 0;
+    let pk = 0, p = 0, last = 0, timer = 0;
+    const show = () => { fill.style[vertical ? 'height' : 'width'] = (p * 100) + '%'; peak.style[vertical ? 'bottom' : 'left'] = (pk * 100) + '%'; };
+    // The peak falls back by itself, with the time that passes (not with the values that come: a value that stops coming must not leave it up)
+    const fall = () => {
+      const now = Date.now(), dt = Math.min(0.25, (now - last) / 1000); last = now;
+      pk = Math.max(p, pk - 0.6 * dt); show();
+      if (pk <= p) { clearInterval(timer); timer = 0; }
+    };
     return { el: root, set: x => {
-      const p = clamp((x - c.min) / span, 0, 1); pk = Math.max(p, pk - 0.012);
-      fill.style[vertical ? 'height' : 'width'] = (p * 100) + '%'; peak.style[vertical ? 'bottom' : 'left'] = (pk * 100) + '%';
+      p = clamp((x - c.min) / span, 0, 1);
+      if (p >= pk) pk = p; else if (!timer) { last = Date.now(); timer = setInterval(fall, 40); }
+      show();
     } };
   }
   function readout(c) {
@@ -497,6 +506,7 @@ inline constexpr char kScriptC[] = R"JS(
     const c = it.c, t = { it, el: el('div', 'tile' + (c.kind === 'group' ? ' sec' : '')), api: null };
     const face = el('div', 'face'), hd = el('div', 'hd'), name = el('span', '', leaf(c.name)), val = el('b');
     if (c.signal) face.classList.add('sig');
+    if (c.ro) face.classList.add('ro');
     if (c.dest) name.title = c.dest; // only the node's name shows; the whole address is on hover
     face.style.setProperty('--a', c.accent || '');
     if (!c.accent) face.style.removeProperty('--a');
@@ -703,7 +713,7 @@ inline constexpr char kScriptD[] = R"JS(
     if (c.targets && c.targets.length) targetEditor(sh, c, numeric);
     if (c.kind === 'points' && c.balls && c.balls.length) ballEditor(sh, c, field, text, numeric);
     else if (c.physics) physFields(sh, c.physics, ph => push({ physics: ph }), key => { flush(); send({ t: 'physicsWidget', id: c.id, key }); });
-    if ((c.kind === 'slider' || c.kind === 'toggle') && !c.physTarget && !c.signal && filterCat) filterEditor(sh, c);
+    if ((c.kind === 'slider' || c.kind === 'toggle') && !c.physTarget && !c.signal && !c.ro && filterCat) filterEditor(sh, c);
     const del = el('button', 'del', 'Delete this control'); del.onclick = () => { send({ t: 'remove', id: c.id }); sheetId = 0; };
     sh.appendChild(del);
     sh.classList.add('open'); sh.classList.toggle('pinned', inspectorMode === 'always');
