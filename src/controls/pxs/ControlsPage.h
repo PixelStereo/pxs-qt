@@ -738,6 +738,7 @@ inline constexpr char kScriptD[] = R"JS(
       const row = el('div', 'row'), cell2 = (l, n) => { const d = el('div'); d.appendChild(el('label', '', l)); d.appendChild(n); return d; };
       row.appendChild(cell2('Min', numeric(c.min, v => push({ min: v })))); row.appendChild(cell2('Max', numeric(c.max, v => push({ max: v })))); sh.appendChild(row);
       const row2 = el('div', 'row'); row2.appendChild(cell2('Step', numeric(c.step, v => push({ step: v })))); row2.appendChild(cell2('Unit', text(c.unit || '', v => push({ unit: v })))); sh.appendChild(row2);
+      if (c.ownRange) { const rb = el('button', 'hb', "Use the address's range"); rb.title = 'This tile has a range of its own: take the one of the address again'; rb.onclick = () => { flush(); send({ t: 'edit', id: c.id, props: { ownRange: false } }); }; rb.style.margin = '6px 0'; sh.appendChild(rb); }
       if (c.kind === 'slider') {
       sh.appendChild(el('label', '', 'Curve'));
       const r = el('input'), hint = el('div', 'hint'); r.type = 'range'; r.min = -100; r.max = 100; r.value = Math.round(Math.log(c.curve || 1) / Math.log(4) * 100);
@@ -750,7 +751,7 @@ inline constexpr char kScriptD[] = R"JS(
       sh.appendChild(el('label', '', c.signal || c.ro ? 'Shows' : 'Talks to'));
       const ad = el('div', 'addr', c.dest); ad.style.cssText = 'font:12px ui-monospace,Menlo,monospace;word-break:break-all;padding:8px;border:1px solid var(--line);border-radius:9px;background:var(--panel2)'; sh.appendChild(ad);
       sh.appendChild(el('div', 'hint', 'It also gets its value from there (the feedback). Drop another address from the tree on this tile to change it.'));
-      if (!c.signal && !c.ro && c.kind === 'slider') { const mb = el('button', 'hb', 'Send to several addresses…'); mb.title = 'Make it a multi-target interaction: this address becomes its first target'; mb.onclick = () => { flush(); send({ t: 'multi', id: c.id }); }; mb.style.marginTop = '6px'; sh.appendChild(mb); }
+      if (!c.signal && !c.ro && c.kind === 'slider') { const mb = el('button', 'hb', 'Send to several addresses…'); mb.title = 'Make it a multi-target interaction: this address becomes its first target'; mb.onclick = () => { flush(); send({ t: 'multitarget', id: c.id }); }; mb.style.marginTop = '6px'; sh.appendChild(mb); }
     }
     if (c.targets && c.targets.length) targetEditor(sh, c, numeric);
     if (c.kind === 'points' && c.balls && c.balls.length) ballEditor(sh, c, field, text, numeric);

@@ -92,6 +92,22 @@ int main()
         check(Control::fromJson(r.toJson()).readOnly && r.wireJson().value("ro").toBool() && !Control().wireJson().contains("ro"), "a tile that is only shown is read-only");
     }
 
+    // The range of a tile that is a view: its own once the operator sets it, the parameter's again when asked
+    {
+        Control v;
+        v.kind = Control::Kind::Slider;
+        v.boundParam = "/p";
+        check(!v.ownRange, "a view has the parameter's range to begin with");
+        v.applyProps(QJsonObject{{"max", 127}});
+        check(v.ownRange && v.max == 127 && Control::fromJson(v.toJson()).ownRange && v.wireJson().value("ownRange").toBool(), "setting a range makes it the tile's own");
+        v.applyProps(QJsonObject{{"ownRange", false}});
+        check(!v.ownRange && !v.toJson().contains("ownRange"), "and it can be given back");
+        Control free;
+        free.kind = Control::Kind::Slider;
+        free.applyProps(QJsonObject{{"max", 5}});
+        check(!free.ownRange, "a tile that is not a view has no parameter range to leave");
+    }
+
     // The chain, at once
     FilterRunner run;
     const QJsonArray clamp{stage("clamp", 0.2, 0.8)};

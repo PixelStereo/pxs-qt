@@ -141,6 +141,7 @@ struct Control {
     quint64 physTarget = 0;
     QString physKey;
     QStringList resets;  // derived, not kept: the addresses that put the defaults of what it is a view of back (the application tells); the tile shows a reset button
+    bool ownRange = false; // a view of a parameter whose range (Min, Max, Step) is the tile's own, set by the operator: the parameter's is only a limit
     bool readOnly = false; // what it shows cannot be set (a parameter that is only read): drawn with any widget, never moved
     bool signal = false; // what it shows is a signal the device emits (no value of its own): shown, never set
     QString boundLabel;  // where it comes from, for the page to show on the tile ("Device:/layer.1/opacity")
@@ -270,6 +271,7 @@ struct Control {
         if (!boundLabel.isEmpty() && physTarget) o["boundLabel"] = boundLabel;
         if (signal) o["signal"] = true;
         if (readOnly) o["readonly"] = true;
+        if (ownRange) o["ownRange"] = true;
         if (bound()) {
             QJsonObject b{{"scope", QString::number(boundScope)}, {"param", boundParam}};
             if (!boundParam2.isEmpty()) b["param2"] = boundParam2;
@@ -425,6 +427,8 @@ struct Control {
             if (!(max > min)) max = min + 1;
         }
         if (kind == Kind::Slider || kind == Kind::Multi) {
+            if (kind == Kind::Slider && !boundParam.isEmpty() && (p.contains("min") || p.contains("max") || p.contains("step"))) ownRange = true; // its range is its own from now on
+            if (p.value("ownRange").isBool()) ownRange = p.value("ownRange").toBool();               // false: the parameter's again
             number("min", min);
             number("max", max);
             number("step", step);
@@ -445,6 +449,7 @@ struct Control {
         if ((bound() || physTarget) && !boundLabel.isEmpty()) o["dest"] = boundLabel;
         if (signal) o["signal"] = true;
         if (readOnly) o["ro"] = true;
+        if (ownRange) o["ownRange"] = true;
         if (!targets.empty()) o["dest"] = QString("%1 target%2").arg(targets.size()).arg(targets.size() == 1 ? "" : "s");
         if (!resets.isEmpty()) o["reset"] = true;
         if (!targets.empty()) {
@@ -538,6 +543,7 @@ struct Control {
         c.span = std::clamp(o.value("span").toInt(1), 1, 4);
         c.signal = o.value("signal").toBool();
         c.readOnly = o.value("readonly").toBool();
+        c.ownRange = o.value("ownRange").toBool();
         if (const QJsonObject b = o.value("bind").toObject(); !b.value("param").toString().isEmpty() || (c.kind == Kind::Points && b.contains("scope"))) {
             c.boundScope = b.value("scope").toString().toULongLong();
             c.boundParam = b.value("param").toString();

@@ -545,9 +545,13 @@ void fillBound(Control &c, const ParameterSource &source)
     switch (c.kind) {
     case Kind::Slider:
         if (!info.isNumber()) return;
-        c.min = info.min;
-        c.max = info.max > info.min ? info.max : info.min + 1;
-        c.step = info.type == ParamInfo::Type::Int ? std::max(1.0, info.step) : std::max(1e-6, info.step);
+        if (!c.ownRange) { // the parameter's range, unless the operator gave the tile its own
+            c.min = info.min;
+            c.max = info.max > info.min ? info.max : info.min + 1;
+            c.step = info.type == ParamInfo::Type::Int ? std::max(1.0, info.step) : std::max(1e-6, info.step);
+        } else if (!(c.max > c.min)) {
+            c.max = c.min + 1;
+        }
         c.value = std::clamp(now.toDouble(), std::min(c.min, c.max), std::max(c.min, c.max));
         break;
     case Kind::Toggle: c.value = now.toBool() ? 1.0 : 0.0; break;
@@ -565,7 +569,12 @@ bool setBound(const Control &c, ParameterSource &source, double value)
     if (!source.info(c.boundScope, c.boundParam, &info) || !(info.access & ParamInfo::Write)) return false;
     bool ok = false;
     switch (c.kind) {
-    case Kind::Slider: ok = info.isNumber() && source.setNumber(c.boundScope, c.boundParam, value); break;
+    case Kind::Slider: {
+        double v = value;
+        if (c.ownRange && !info.unbounded && info.max > info.min) v = std::clamp(v, info.min, info.max); // the tile's own range is within what the parameter takes
+        ok = info.isNumber() && source.setNumber(c.boundScope, c.boundParam, v);
+        break;
+    }
     case Kind::Toggle: ok = source.setJson(c.boundScope, c.boundParam, value >= 0.5); break;
     case Kind::Choice: {
         const std::vector<std::string> &keys = info.choices;
