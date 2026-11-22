@@ -5,6 +5,18 @@
 
 namespace pxs::controls {
 
+namespace {
+// What pxs-core says as std::string is Qt's QString here (the controls' own types are Qt's)
+QString qs(const std::string &s) { return QString::fromUtf8(s.data(), qsizetype(s.size())); }
+QStringList choicesOf(const ParamInfo &info)
+{
+    QStringList out;
+    for (const std::string &key : info.choices) out << qs(key);
+    return out;
+}
+} // namespace
+
+
 using Kind = Control::Kind;
 
 const Control *find(const std::vector<Control> &list, quint64 id)
@@ -362,12 +374,12 @@ std::optional<Control> forParameter(const ParameterSource &source, quint64 scope
     QString target = path; // what the control drives: the parameter, or a whole color
     Control c;
     c.group = group;
-    c.name = info.name();
+    c.name = qs(info.name());
     const QJsonValue now = source.value(scope, path);
     if (info.colorComponent >= 0 && path.size() > 2 && path[path.size() - 2] == QLatin1Char('/')) { // a color's channel: the color
         target = path.left(path.size() - 2);
         c.kind = Kind::Color;
-        c.name = info.label.section(QStringLiteral(" › "), -1).section(QLatin1Char(' '), 0, -2).trimmed();
+        c.name = qs(info.label).section(QStringLiteral(" › "), -1).section(QLatin1Char(' '), 0, -2).trimmed();
         for (int k = 0; k < 3; ++k) {
             const QJsonValue v = source.value(scope, target + QLatin1Char('/') + QLatin1Char("rgb"[k]));
             if (v.isDouble()) c.rgb[size_t(k)] = std::clamp(v.toDouble(), 0.0, 1.0);
@@ -377,8 +389,8 @@ std::optional<Control> forParameter(const ParameterSource &source, quint64 scope
         c.value = now.toBool() ? 1 : 0;
     } else if (info.type == ParamInfo::Type::Choice) {
         c.kind = Kind::Choice;
-        c.choices = info.choices;
-        c.value = std::max(0, int(info.choices.indexOf(now.toString())));
+        c.choices = choicesOf(info);
+        c.value = std::max(0, int(c.choices.indexOf(now.toString())));
     } else if (info.type == ParamInfo::Type::Trigger) {
         c.kind = Kind::Button;
     } else {
@@ -386,12 +398,13 @@ std::optional<Control> forParameter(const ParameterSource &source, quint64 scope
         c.min = info.min;
         c.max = info.max > info.min ? info.max : info.min + 1;
         c.step = info.type == ParamInfo::Type::Int ? std::max(1.0, info.step) : std::max(1e-6, info.step);
-        c.def = std::clamp(info.defaultValue.isValid() ? info.defaultValue.toDouble() : c.min, c.min, c.max);
+        c.def = std::clamp(info.defaultValue.isNil() ? c.min : info.defaultValue.number().value_or(0.0), c.min, c.max);
         c.value = std::clamp(now.toDouble(c.def), c.min, c.max);
-        const QString unit = info.label.section(QLatin1Char('('), -1);
-        if (info.label.endsWith(QLatin1Char(')')) && unit.size() < 8) c.unit = QLatin1Char(' ') + unit.chopped(1); // "Rotation (°)" -> " °"
+        const QString label = qs(info.label);
+        const QString unit = label.section(QLatin1Char('('), -1);
+        if (label.endsWith(QLatin1Char(')')) && unit.size() < 8) c.unit = QLatin1Char(' ') + unit.chopped(1); // "Rotation (°)" -> " °"
     }
-    if (c.name.isEmpty()) c.name = info.name();
+    if (c.name.isEmpty()) c.name = qs(info.name());
     c.boundScope = scope;
     c.boundParam = target;
     c.signal = info.signal;
@@ -418,7 +431,7 @@ std::optional<Control> forParameters(const ParameterSource &source, quint64 scop
     c.physics.tension = 0; // its balls are thrown
     c.kind = Kind::Points; // a pad of one ball, bound to the two parameters; balls can be added to it
     c.group = group;
-    c.name = x.name() + QStringLiteral(" / ") + y.name();
+    c.name = qs(x.name()) + QStringLiteral(" / ") + qs(y.name());
     c.count = 1;
     c.min = 0;
     c.max = 1;
@@ -517,7 +530,7 @@ void fillBound(Control &c, const ParameterSource &source)
         break;
     case Kind::Toggle: c.value = now.toBool() ? 1.0 : 0.0; break;
     case Kind::Choice:
-        if (!info.choices.isEmpty()) c.choices = info.choices;
+        if (!info.choices.empty()) c.choices = choicesOf(info);
         c.value = std::max<qsizetype>(0, c.choices.indexOf(now.toString()));
         break;
     default: break;
@@ -533,9 +546,9 @@ bool setBound(const Control &c, ParameterSource &source, double value)
     case Kind::Slider: ok = info.isNumber() && source.setNumber(c.boundScope, c.boundParam, value); break;
     case Kind::Toggle: ok = source.setJson(c.boundScope, c.boundParam, value >= 0.5); break;
     case Kind::Choice: {
-        const QStringList &keys = info.choices;
+        const std::vector<std::string> &keys = info.choices;
         const int k = std::clamp(int(std::lround(value)), 0, int(keys.size()) - 1);
-        ok = !keys.isEmpty() && source.setJson(c.boundScope, c.boundParam, keys[k]);
+        ok = !keys.empty() && source.setJson(c.boundScope, c.boundParam, qs(keys[std::size_t(k)]));
         break;
     }
     case Kind::Button: ok = value >= 0.5 && source.setJson(c.boundScope, c.boundParam, true); break; // a trigger: sent when pressed
@@ -565,7 +578,7 @@ bool setTargets(const Control &c, ParameterSource &source, double value, int axi
         case ParamInfo::Type::Bool: ok = source.setJson(t.scope, t.path, out >= 0.5); break;
         case ParamInfo::Type::Choice: {
             const int k = std::clamp(int(std::lround(out)), 0, int(info.choices.size()) - 1);
-            ok = !info.choices.isEmpty() && source.setJson(t.scope, t.path, info.choices[k]);
+            ok = !info.choices.empty() && source.setJson(t.scope, t.path, qs(info.choices[std::size_t(k)]));
             break;
         }
         case ParamInfo::Type::Trigger: ok = out >= 0.5 && n >= 0.5 && source.setJson(t.scope, t.path, true); break; // sent when pressed

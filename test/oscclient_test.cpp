@@ -1,5 +1,7 @@
 // The OSCQuery client: the tree of a device, its values (polled: this server does not push), writes over OSC, discovery's packets,
 // and a control that is a view of a remote parameter.
+#include <pxs/Convert.h>
+#include <pxs/core/tree/oscquery.h>
 #include <pxs/Client.h>
 #include <pxs/Discovery.h>
 #include <pxs/MdnsResponder.h>
@@ -34,24 +36,24 @@ int main(int argc, char **argv)
     QCoreApplication app(argc, argv);
 
     // The tree of a device
-    Tree tree;
+    core::tree::Tree tree;
     double level = 0.25;
     bool on = false;
     int cue = -1;
-    auto p = std::make_unique<Parameter>("level", "Level", Parameter::Type::Float);
-    p->range(-6, 6).bind([&] { return QVariant(level); }, [&](const QVariant &v) { level = v.toDouble(); });
+    auto p = std::make_unique<core::tree::Parameter>("level", "Level", core::tree::Parameter::Type::Float);
+    p->range(-6, 6).bind([&] { return core::Value(level); }, [&](const core::Value &v) { level = v.number().value_or(0.0); });
     tree.add("/mix/level", std::move(p));
-    auto q = std::make_unique<Parameter>("on", "On", Parameter::Type::Bool);
-    q->bind([&] { return QVariant(on); }, [&](const QVariant &v) { on = v.toBool(); });
+    auto q = std::make_unique<core::tree::Parameter>("on", "On", core::tree::Parameter::Type::Bool);
+    q->bind([&] { return core::Value(on); }, [&](const core::Value &v) { on = v.truthy(); });
     tree.add("/mix/on", std::move(q));
-    tree.addAction("/show/go", "i", [&](const QVariantList &a) { cue = a.value(0).toInt(); return true; });
+    tree.addAction("/show/go", "i", [&](const core::ValueList &a) { cue = int(a.front().number().value_or(-1)); return true; });
     OscService service(&tree, "Fake");
     CHECK(service.start(0, 0, false));
 
     // RemoteTree reads what Tree says
     RemoteTree remote;
     CHECK(!remote.load(QJsonObject{{"nope", 1}}));
-    CHECK(remote.load(tree.json()));
+    CHECK(remote.load(convert::jsonObjectFromText(core::tree::describeJson(tree))));
     { // a device that says how a parameter is reset (NYXMAP_RESET)
         pxs::oscquery::RemoteTree withReset;
         const QJsonObject doc{{"FULL_PATH", "/"}, {"CONTENTS", QJsonObject{{"a", QJsonObject{{"FULL_PATH", "/a"}, {"TYPE", "f"}, {"ACCESS", 3}, {"NYXMAP_RESET", "/a/reset"},
@@ -71,10 +73,10 @@ int main(int argc, char **argv)
     }
     const RemoteNode *level_ = remote.find("/mix/level");
     CHECK(level_ && level_->type == "f" && level_->access == 3 && level_->value.at(0).toDouble() == 0.25);
-    ParamInfo info;
-    CHECK(level_->toParamInfo(&info) && info.type == ParamInfo::Type::Float && info.min == -6 && info.max == 6);
-    CHECK(remote.find("/mix/on")->toParamInfo(&info) && info.type == ParamInfo::Type::Bool);
-    CHECK(remote.find("/show/go")->toParamInfo(&info) && info.type == ParamInfo::Type::Int);
+    core::tree::ParamInfo info;
+    CHECK(level_->toParamInfo(&info) && info.type == core::tree::ParamInfo::Type::Float && info.min == -6 && info.max == 6);
+    CHECK(remote.find("/mix/on")->toParamInfo(&info) && info.type == core::tree::ParamInfo::Type::Bool);
+    CHECK(remote.find("/show/go")->toParamInfo(&info) && info.type == core::tree::ParamInfo::Type::Int);
     CHECK(!remote.find("/mix")->toParamInfo(&info) && !remote.find("/nowhere"));
     CHECK(remote.leaves() == QStringList({"/mix/level", "/mix/on", "/show/go"}));
 
@@ -116,8 +118,8 @@ int main(int argc, char **argv)
     client.refresh();
     pump([&] { return false; }, 300);
     CHECK(changes == 0); // the same tree
-    auto extra = std::make_unique<Parameter>("extra", "Extra", Parameter::Type::Float);
-    extra->range(0, 1).bind([] { return QVariant(0.0); }, [](const QVariant &) {});
+    auto extra = std::make_unique<core::tree::Parameter>("extra", "Extra", core::tree::Parameter::Type::Float);
+    extra->range(0, 1).bind([] { return core::Value(0.0); }, [](const core::Value &) {});
     tree.add("/mix/extra", std::move(extra));
     client.refresh();
     pump([&] { return changes > 0; });
@@ -129,8 +131,8 @@ int main(int argc, char **argv)
     tree.changed("/mix/level");
     pump([&] { return !heard.isEmpty(); });
     CHECK(!heard.isEmpty() && heard.at(0).toDouble() == 2.5);
-    auto extra2 = std::make_unique<Parameter>("extra2", "Extra 2", Parameter::Type::Float);
-    extra2->range(0, 1).bind([] { return QVariant(0.0); }, [](const QVariant &) {});
+    auto extra2 = std::make_unique<core::tree::Parameter>("extra2", "Extra 2", core::tree::Parameter::Type::Float);
+    extra2->range(0, 1).bind([] { return core::Value(0.0); }, [](const core::Value &) {});
     tree.add("/mix/extra2", std::move(extra2));
     pump([&] { return changes > 1; }, 1500); // before the client's own look at the tree (every 3 s), no refresh() asked
     CHECK(changes == 2 && client.tree().find("/mix/extra2"));

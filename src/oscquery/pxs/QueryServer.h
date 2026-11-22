@@ -1,6 +1,6 @@
 #pragma once
 
-// The HTTP side of OSCQuery, answered from a pxs::Tree: GET <osc path>[?VALUE|?TYPE|...] and GET /?HOST_INFO, in JSON.
+// The HTTP side of OSCQuery, answered from a pxs::core::tree::Tree: GET <osc path>[?VALUE|?TYPE|...] and GET /?HOST_INFO, in JSON.
 // Status: 200, 204, 400, 404, 405. Reading is open to a web page (CORS).
 //
 // The same port takes a WebSocket (the proposal's optional bi-directional side). A client that sends {"COMMAND": "LISTEN",
@@ -8,7 +8,9 @@
 // packets for the application (packetReceived). The server tells every client {"COMMAND": "PATH_CHANGED", "DATA": "/path"}
 // when the address space changes (broadcast). A web page may not open one unless it comes from this machine: a socket writes.
 
-#include <pxs/Tree.h>
+#include <pxs/core/tree/tree.h>
+
+#include <QJsonObject>
 
 #include <QHash>
 #include <QHostAddress>
@@ -22,7 +24,7 @@ namespace pxs {
 class QueryServer : public QObject {
     Q_OBJECT
 public:
-    explicit QueryServer(const Tree *tree, QObject *parent = nullptr);
+    explicit QueryServer(const core::tree::Tree *tree, QObject *parent = nullptr);
 
     bool start(quint16 port); // 0: any free port
     void stop();
@@ -64,7 +66,7 @@ private:
     bool upgrade(QTcpSocket *socket, const QList<QByteArray> &request, const QHash<QByteArray, QByteArray> &headers);
     void command(QTcpSocket *socket, const QByteArray &json);
 
-    const Tree *m_tree;
+    const core::tree::Tree *m_tree;
     QTcpServer m_server;
     struct Client {
         QByteArray buffer;
@@ -74,7 +76,7 @@ private:
     QHash<QTcpSocket *, Client> m_clients;
     QString m_name = QStringLiteral("pxs");
     quint16 m_oscPort = 0;
-    QJsonObject m_extensions = Tree::defaultExtensions();
+    QJsonObject m_extensions;
     QJsonObject m_more;
     QHostAddress m_bind = QHostAddress::Any;
     bool m_cors = true;

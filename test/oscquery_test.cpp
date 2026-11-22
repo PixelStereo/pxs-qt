@@ -2,6 +2,7 @@
 
 #include <QCoreApplication>
 #include <QJsonDocument>
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QElapsedTimer>
 #include <cstdio>
@@ -10,6 +11,7 @@ static int failures = 0;
 #define CHECK(condition) do { if (!(condition)) { std::fprintf(stderr, "FAILED %s:%d %s\n", __FILE__, __LINE__, #condition); ++failures; } } while (0)
 
 using namespace pxs;
+using pxs::core::Value;
 
 static void pump(QCoreApplication &app, const std::function<bool()> &until, int ms = 2000)
 {
@@ -21,13 +23,13 @@ static void pump(QCoreApplication &app, const std::function<bool()> &until, int 
 int main(int argc, char **argv)
 {
     QCoreApplication app(argc, argv);
-    Tree tree;
+    core::tree::Tree tree;
     int cue = -1;
-    tree.addAction("/show/go", "i", [&](const QVariantList &a) { cue = a.value(0).toInt(); return true; }, "Go to a cue");
+    tree.addAction("/show/go", "i", [&](const core::ValueList &a) { cue = int(a.front().number().value_or(-1)); return true; }, "Go to a cue");
     tree.addSignal("/detect/peak", "f", "A peak was heard");
     double level = 0.5;
-    auto p = std::make_unique<Parameter>("level", "Level", Parameter::Type::Float);
-    p->range(0, 1).bind([&] { return QVariant(level); }, [&](const QVariant &v) { level = v.toDouble(); });
+    auto p = std::make_unique<core::tree::Parameter>("level", "Level", core::tree::Parameter::Type::Float);
+    p->range(0, 1).bind([&] { return Value(level); }, [&](const Value &v) { level = v.number().value_or(0.0); });
     tree.add("/level", std::move(p));
 
     OscService service(&tree, "TestApp");
@@ -68,12 +70,12 @@ int main(int argc, char **argv)
     pump(app, [&] { return level == 0.25; });
     CHECK(level == 0.25);
     tree.changed("/level");
-    tree.fire("/detect/peak", {0.9}); // a signal does not go to someone who only wrote a parameter
+    tree.fire("/detect/peak", {Value(0.9)}); // a signal does not go to someone who only wrote a parameter
     pump(app, [&] { return heard.size() >= 1; });
     pump(app, [&] { return false; }, 150);
     CHECK(heard.size() == 1 && heard[0].address == "/level");
     service.addTarget(QHostAddress::LocalHost, client.localPort()); // a destination of the application gets the signals
-    tree.fire("/detect/peak", {0.9});
+    tree.fire("/detect/peak", {Value(0.9)});
     pump(app, [&] { return heard.size() >= 2; });
     CHECK(heard.size() == 2 && heard[1].address == "/detect/peak");
 
@@ -89,7 +91,7 @@ int main(int argc, char **argv)
     };
     CHECK(rawGet(service.httpPort()).contains("Access-Control-Allow-Origin: *"));
     {
-        Tree quiet;
+        core::tree::Tree quiet;
         OscService local(&quiet, "Local");
         local.setLocalOnly(true);
         CHECK(local.start(0, 0));

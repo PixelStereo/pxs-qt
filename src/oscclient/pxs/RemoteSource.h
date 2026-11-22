@@ -11,7 +11,7 @@ class RemoteSource final : public controls::ParameterSource {
 public:
     explicit RemoteSource(Client *client) : m_client(client) {}
 
-    bool info(quint64, const QString &path, ParamInfo *out) const override
+    bool info(quint64, const QString &path, controls::ParamInfo *out) const override
     {
         const RemoteNode *n = m_client->tree().find(path);
         return n && n->toParamInfo(out);

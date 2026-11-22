@@ -1,8 +1,8 @@
 #pragma once
 // What an OSCQuery device says of itself (its / answer), kept as a tree the application can browse and read: each node's address, type
-// tags, access, range, description and last value. A node that holds one argument can be seen as a ParamInfo (pxs::params), which is
+// tags, access, range, description and last value. A node that holds one argument can be seen as a ParamInfo (pxs-core), which is
 // how a control becomes a view of a remote parameter (RemoteSource.h).
-#include <Parameter.h>
+#include <pxs/core/tree/parameter.h>
 
 #include <QJsonArray>
 #include <QJsonObject>
@@ -30,7 +30,7 @@ struct RemoteNode {
     bool isContainer() const { return type.isEmpty() && access == 0; }
     bool isLeaf() const { return !type.isEmpty() || access != 0; }
     // As one parameter: false when it has no type or several arguments (a leaf of one argument only)
-    bool toParamInfo(ParamInfo *out) const;
+    bool toParamInfo(core::tree::ParamInfo *out) const;
 };
 
 class RemoteTree {

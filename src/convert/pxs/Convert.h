@@ -9,6 +9,7 @@
 // platform.
 
 #include <pxs/core/osc/codec.h>
+#include <pxs/core/tree/parameter.h>
 #include <pxs/core/value.h>
 
 #include <OscCodec.h>
@@ -50,5 +51,32 @@ std::string toJsonText(const QJsonArray &a);
 QJsonValue jsonValueFromText(const std::string &text); // Undefined when the text is not JSON
 QJsonObject jsonObjectFromText(const std::string &text);
 QJsonArray jsonArrayFromText(const std::string &text);
+
+// A value as a file keeps it (a project, a snapshot): a number, a switch, a text; null for what has none. Back: what a parameter stores.
+QJsonValue toJson(const core::Value &v);
+core::Value fromJson(const QJsonValue &v); // null, undefined, an object or an array: Nil
+
+// The values of a holder's parameters in a file, by address (only those that are stored: read and written, not an action); read back in
+// their order, an address the holder no longer has going to `unknown`, when given. `List` holds pointers (raw or smart) to
+// pxs::core::tree::Parameter.
+template <class List> QJsonObject parametersToJson(const List &params)
+{
+    QJsonObject o;
+    for (const auto &p : params)
+        if (p->isStored()) o.insert(fromUtf8(p->path()), toJson(p->stored()));
+    return o;
+}
+template <class List> void parametersFromJson(const List &params, const QJsonObject &o, QJsonObject *unknown = nullptr)
+{
+    QJsonObject left = o;
+    for (const auto &p : params) {
+        const QString key = fromUtf8(p->path());
+        const auto it = left.constFind(key);
+        if (it == left.constEnd()) continue;
+        if (p->isStored()) p->setStored(fromJson(it.value()));
+        left.remove(key);
+    }
+    if (unknown) *unknown = left;
+}
 
 } // namespace pxs::convert

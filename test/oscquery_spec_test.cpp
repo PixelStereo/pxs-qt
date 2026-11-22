@@ -14,6 +14,8 @@ static int failures = 0;
 #define CHECK(condition) do { if (!(condition)) { std::fprintf(stderr, "FAILED %s:%d %s\n", __FILE__, __LINE__, #condition); ++failures; } } while (0)
 
 using namespace pxs;
+using pxs::core::Value;
+using pxs::core::tree::ArgRange;
 
 // Everything `want` says is in `have` (objects by key, arrays by position and size)
 static bool includes(const QJsonValue &have, const QJsonValue &want)
@@ -47,23 +49,23 @@ int main(int argc, char **argv)
 {
     QCoreApplication app(argc, argv);
     // The proposal's address space: /foo (read-only, 0-100), /bar (two ints), /baz/qux (a choice)
-    Tree tree;
+    core::tree::Tree tree;
     tree.root().description = "root node";
-    pxs::Node &foo = tree.add("/foo");
+    core::tree::Node &foo = tree.add("/foo");
     foo.type = "f"; foo.access = 1; foo.description = "demonstrates a read-only OSC node- single float value ranged 0-100";
-    foo.range = QJsonArray{QJsonObject{{"MIN", 0.0}, {"MAX", 100.0}}};
-    foo.get = [] { return QVariantList{0.5}; };
-    pxs::Node &bar = tree.add("/bar");
+    foo.range = {ArgRange{Value(0.0), Value(100.0), {}, {}}};
+    foo.get = [] { return core::ValueList{Value(0.5)}; };
+    core::tree::Node &bar = tree.add("/bar");
     bar.type = "ii"; bar.access = 3; bar.description = "demonstrates a read/write OSC node- two ints with different ranges";
-    bar.range = QJsonArray{QJsonObject{{"MIN", 0}, {"MAX", 50}}, QJsonObject{{"MIN", 51}, {"MAX", 100}}};
-    bar.get = [] { return QVariantList{4, 51}; };
-    bar.set = [](const QVariantList &) { return true; };
+    bar.range = {ArgRange{Value(0), Value(50), {}, {}}, ArgRange{Value(51), Value(100), {}, {}}};
+    bar.get = [] { return core::ValueList{Value(4), Value(51)}; };
+    bar.set = [](const core::ValueList &) { return true; };
     tree.add("/baz").description = "simple container node, with one method- qux";
-    pxs::Node &qux = tree.add("/baz/qux");
+    core::tree::Node &qux = tree.add("/baz/qux");
     qux.type = "s"; qux.access = 3; qux.description = "read/write OSC node- accepts one of several string-type inputs";
-    qux.range = QJsonArray{QJsonObject{{"VALS", QJsonArray{"empty", "half-full", "full"}}}};
-    qux.get = [] { return QVariantList{QStringLiteral("half-full")}; };
-    qux.set = [](const QVariantList &) { return true; };
+    qux.range = {ArgRange{std::nullopt, std::nullopt, {Value("empty"), Value("half-full"), Value("full")}, {}}};
+    qux.get = [] { return core::ValueList{Value("half-full")}; };
+    qux.set = [](const core::ValueList &) { return true; };
 
     QueryServer server(&tree);
     server.setName("My Special Server");
@@ -117,30 +119,30 @@ int main(int argc, char **argv)
     }
 
     // Values and ranges follow the type tag string, arrays included, with the JSON equivalents of the proposal's table
-    pxs::Node &nested = tree.add("/nested");
+    core::tree::Node &nested = tree.add("/nested");
     nested.type = "i[ff]i"; nested.access = 3;
-    nested.range = QJsonArray{QJsonObject{{"MIN", 0}, {"MAX", 100}}, QJsonArray{QJsonObject{{"MIN", 0.0}, {"MAX", 1.0}}, QJsonObject{{"MIN", 0.0}, {"MAX", 1.0}}},
-                              QJsonObject{{"MIN", 0}, {"MAX", 100}}};
-    nested.get = [] { return QVariantList{100, 1.0, 1.0, 100}; };
+    const ArgRange unit{Value(0.0), Value(1.0), {}, {}};
+    nested.range = {ArgRange{Value(0), Value(100), {}, {}}, ArgRange{std::nullopt, std::nullopt, {}, {unit, unit}}, ArgRange{Value(0), Value(100), {}, {}}};
+    nested.get = [] { return core::ValueList{Value(100), Value(1.0), Value(1.0), Value(100)}; };
     CHECK(includes(body("/nested"), parse(R"({"TYPE": "i[ff]i", "VALUE": [100, [1.0, 1.0], 100],
         "RANGE": [{"MIN": 0, "MAX": 100}, [{"MIN": 0.0, "MAX": 1.0}, {"MIN": 0.0, "MAX": 1.0}], {"MIN": 0, "MAX": 100}]})")));
-    pxs::Node &color = tree.add("/color");
+    core::tree::Node &color = tree.add("/color");
     color.type = "r"; color.access = 3;
-    color.get = [] { return QVariantList{qlonglong(0xFA6432FF)}; };
+    color.get = [] { return core::ValueList{Value(std::int64_t(0xFA6432FFLL))}; };
     CHECK(body("/color?VALUE") == parse(R"({"VALUE": ["#FA6432FF"]})").toObject());
-    pxs::Node &blob = tree.add("/misc");
+    core::tree::Node &blob = tree.add("/misc");
     blob.type = "bsTF"; blob.access = 1;
-    blob.get = [] { return QVariantList{QVariant(), QStringLiteral("s"), true, false}; };
+    blob.get = [] { return core::ValueList{Value(), Value("s"), Value(true), Value(false)}; };
     CHECK(body("/misc?VALUE") == parse(R"({"VALUE": [null, "s", true, false]})").toObject());
 
     // T and F are used interchangeably: an F sent to a method of type T is accepted
     bool on = true;
-    pxs::Node &sw = tree.add("/sw");
+    core::tree::Node &sw = tree.add("/sw");
     sw.type = "T"; sw.access = 3;
-    sw.get = [&] { return QVariantList{on}; };
-    sw.set = [&](const QVariantList &a) { on = a.value(0).toBool(); return true; };
-    CHECK(tree.apply({"/sw", "F", {false}}) == 1 && !on);
-    CHECK(tree.apply({"/sw", "T", {true}}) == 1 && on);
+    sw.get = [&] { return core::ValueList{Value(on)}; };
+    sw.set = [&](const core::ValueList &a) { on = !a.empty() && a.front().truthy(); return true; };
+    CHECK(tree.apply("/sw", {Value(false)}) == 1 && !on);
+    CHECK(tree.apply("/sw", {Value(true)}) == 1 && on);
 
     // Errors: the HTTP status that fits
     CHECK(server.answer("POST", "/").status == 405);

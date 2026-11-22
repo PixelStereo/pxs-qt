@@ -2,7 +2,7 @@
 
 // What an application needs to be reachable like every other Pixel Stereo application: an OSC port (UDP) that applies
 // what it receives to the tree, the OSCQuery HTTP side, and the announcement on the local network (mDNS). What the
-// application says goes back over UDP, see Tree::setOutput:
+// application says goes back over UDP, see core::tree::Tree::setOutput:
 //   a parameter that changed (the feedback) -> the senders that wrote to it, and the targets
 //   a signal fired                          -> the targets only (a stream: nobody gets it by merely writing a parameter)
 // And the WebSocket of the OSCQuery port: a client that LISTENs to an address is streamed its values (a parameter written
@@ -12,6 +12,10 @@
 
 #include <pxs/MdnsResponder.h>
 #include <pxs/QueryServer.h>
+#include <pxs/core/osc/codec.h>
+#include <pxs/core/tree/tree.h>
+
+#include <OscCodec.h>
 
 #include <QHostAddress>
 #include <QTimer>
@@ -23,7 +27,7 @@ namespace pxs {
 class OscService : public QObject {
     Q_OBJECT
 public:
-    OscService(Tree *tree, const QString &name, QObject *parent = nullptr);
+    OscService(core::tree::Tree *tree, const QString &name, QObject *parent = nullptr);
     ~OscService() override;
 
     // Reachable from this computer only (before start()): the UDP port and the HTTP / WebSocket port are bound to the loopback, nothing
@@ -51,13 +55,13 @@ signals:
 
 private:
     void onReadyRead();
-    void send(const osc::Message &message);
+    void send(const core::osc::Message &message);
     void apply(const QByteArray &packet, const QHostAddress *from, quint16 port);
-    void onChanged(const Node &node, const QVariantList &args); // from any thread
-    void onStructure(const QString &path, Tree::Change change); // from any thread
+    void onChanged(const core::tree::Node &node, const core::ValueList &args); // from any thread
+    void onStructure(const std::string &path, core::tree::Tree::Change change); // from any thread
     void onPathTimer();
 
-    Tree *m_tree;
+    core::tree::Tree *m_tree;
     QString m_name;
     QUdpSocket m_udp;
     QueryServer m_http;
@@ -68,7 +72,7 @@ private:
     int m_observer = 0;
     std::atomic<int> m_webSockets{0}; // read by the thread that writes: nothing is built when nobody listens
     QTimer m_pathTimer;
-    QList<QPair<QString, Tree::Change>> m_pending; // the structure changes since the last message to the clients
+    QList<QPair<QString, core::tree::Tree::Change>> m_pending; // the structure changes since the last message to the clients
 };
 
 } // namespace pxs

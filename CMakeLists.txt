@@ -33,12 +33,20 @@ add_library(pxs::osc ALIAS pxs_osc)
 target_include_directories(pxs_osc PUBLIC src/osc)
 target_link_libraries(pxs_osc PUBLIC Qt6::Core PRIVATE pxs-core::osc pxs-core::websocket)
 
-# Parameters: how an application declares what can be read, written, saved and driven over OSC, and how the others
-# are told it changed (ChangeFeed). Qt Core only.
-add_library(pxs_params STATIC src/params/Parameter.cpp src/params/Parameter.h src/params/ChangeFeed.h)
+# The bridge to pxs-core's portable types (QVariant <-> Value, QString <-> UTF-8, QJson <-> JSON text, the OSC message of the Qt API <-> pxs-core's):
+# what an application that moves to pxs::core::tree uses at its edges. Its header names pxs-core's types, so pxs-core is PUBLIC here.
+add_library(pxs_convert STATIC src/convert/Convert.cpp src/convert/pxs/Convert.h)
+add_library(pxs::convert ALIAS pxs_convert)
+target_include_directories(pxs_convert PUBLIC src/convert)
+target_link_libraries(pxs_convert PUBLIC pxs::osc pxs-core::tree pxs-core::value pxs-core::osc Qt6::Core)
+
+# Parameters and the address space (pxs::core::tree, in pxs-core: no Qt). These two names stay as targets so that an application's CMake does
+# not change: they bring pxs-core's tree and the bridge to Qt's types (pxs::convert). The tree, its parameters, the presets and the change
+# feed are pxs-core's: an application includes <pxs/core/tree/tree.h>, <pxs/core/tree/parameter.h>, <pxs/core/tree/preset.h> and
+# <pxs/core/feed/change_feed.h>.
+add_library(pxs_params INTERFACE)
 add_library(pxs::params ALIAS pxs_params)
-target_include_directories(pxs_params PUBLIC src/params)
-target_link_libraries(pxs_params PUBLIC Qt6::Core)
+target_link_libraries(pxs_params INTERFACE pxs-core::tree pxs-core::feed pxs::convert)
 
 # The look: colour tokens, dark palettes, the style sheet every application shares
 add_library(pxs_theme STATIC src/theme/Theme.cpp src/theme/pxs/Theme.h)
@@ -46,11 +54,9 @@ add_library(pxs::theme ALIAS pxs_theme)
 target_include_directories(pxs_theme PUBLIC src/theme)
 target_link_libraries(pxs_theme PUBLIC Qt6::Widgets)
 
-# The address space: a tree of nodes carrying parameters, OSC messages applied to it, the OSCQuery description derived from it
-add_library(pxs_tree STATIC src/tree/Tree.cpp src/tree/Preset.cpp src/tree/pxs/Tree.h src/tree/pxs/Preset.h)
+add_library(pxs_tree INTERFACE)
 add_library(pxs::tree ALIAS pxs_tree)
-target_include_directories(pxs_tree PUBLIC src/tree)
-target_link_libraries(pxs_tree PUBLIC pxs::osc pxs::params)
+target_link_libraries(pxs_tree INTERFACE pxs::params pxs::osc)
 
 # OSC and OSCQuery over the network: UDP in and out, the HTTP side, the mDNS announcement. Every application is
 # reachable the same way.
@@ -84,13 +90,6 @@ add_library(pxs::bind ALIAS pxs_bind)
 set_target_properties(pxs_bind PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_include_directories(pxs_bind PUBLIC src/bind)
 target_link_libraries(pxs_bind PUBLIC pxs::tree pxs::widgets)
-
-# The bridge to pxs-core's portable types (QVariant <-> Value, QString <-> UTF-8, QJson <-> JSON text, the OSC message of the Qt API <-> pxs-core's):
-# what an application that moves to pxs::core::tree uses at its edges. Its header names pxs-core's types, so pxs-core is PUBLIC here.
-add_library(pxs_convert STATIC src/convert/Convert.cpp src/convert/pxs/Convert.h)
-add_library(pxs::convert ALIAS pxs_convert)
-target_include_directories(pxs_convert PUBLIC src/convert)
-target_link_libraries(pxs_convert PUBLIC pxs::osc pxs-core::value pxs-core::osc Qt6::Core)
 
 # Controls: the model of a control (kinds, JSON, its place on the page) and the page an application serves for them: a free grid,
 # pages for the groups, Edit mode, SVG widgets, and the server (HTTP and WebSocket) that gives a page its controls. Qt Core and Network.
@@ -219,22 +218,9 @@ if(PXS_BUILD_TESTS)
     add_executable(pxs_controls_server_test test/server_test.cpp)
     target_link_libraries(pxs_controls_server_test PRIVATE pxs::controls)
     add_test(NAME controls_server COMMAND pxs_controls_server_test)
-    add_executable(pxs_params_test test/params_test.cpp)
-    target_link_libraries(pxs_params_test PRIVATE pxs::params)
-    add_test(NAME params COMMAND pxs_params_test)
-    add_executable(pxs_tree_test test/tree_test.cpp)
-    target_link_libraries(pxs_tree_test PRIVATE pxs::tree)
-    add_test(NAME tree COMMAND pxs_tree_test)
     add_executable(pxs_convert_test test/convert_test.cpp)
     target_link_libraries(pxs_convert_test PRIVATE pxs::convert)
     add_test(NAME convert COMMAND pxs_convert_test)
-    # The Qt tree above and pxs-core's, side by side on random trees and OSC traffic: the Qt tree is the reference until it is replaced
-    add_executable(pxs_tree_differential_test test/tree_differential_test.cpp)
-    target_link_libraries(pxs_tree_differential_test PRIVATE pxs::tree pxs-core::tree)
-    add_test(NAME tree_differential COMMAND pxs_tree_differential_test strict 150)
-    add_executable(pxs_preset_test test/preset_test.cpp)
-    target_link_libraries(pxs_preset_test PRIVATE pxs::tree)
-    add_test(NAME preset COMMAND pxs_preset_test)
     add_executable(pxs_oscquery_test test/oscquery_test.cpp)
     target_link_libraries(pxs_oscquery_test PRIVATE pxs::oscquery)
     add_test(NAME oscquery COMMAND pxs_oscquery_test)

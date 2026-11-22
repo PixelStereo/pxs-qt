@@ -31,13 +31,13 @@ static QByteArray command(const char *what, const char *path)
 int main(int argc, char **argv)
 {
     QCoreApplication app(argc, argv);
-    Tree tree;
+    core::tree::Tree tree;
     int cue = -1;
-    tree.addAction("/show/go", "i", [&](const QVariantList &a) { cue = a.value(0).toInt(); return true; });
+    tree.addAction("/show/go", "i", [&](const core::ValueList &a) { cue = int(a.front().number().value_or(-1)); return true; });
     tree.addSignal("/detect/peak", "f");
     double level = 0.5;
-    auto p = std::make_unique<Parameter>("level", "Level", Parameter::Type::Float);
-    p->range(0, 1).bind([&] { return QVariant(level); }, [&](const QVariant &v) { level = v.toDouble(); });
+    auto p = std::make_unique<core::tree::Parameter>("level", "Level", core::tree::Parameter::Type::Float);
+    p->range(0, 1).bind([&] { return core::Value(level); }, [&](const core::Value &v) { level = v.number().value_or(0.0); });
     tree.add("/level", std::move(p));
     OscService service(&tree, "WsTest");
     CHECK(service.start(0, 0, false));
@@ -58,27 +58,27 @@ int main(int argc, char **argv)
     CHECK(ws.state() == QAbstractSocket::ConnectedState);
 
     // Nothing is sent before LISTEN; then the values of that address, whoever writes them
-    tree.apply({"/level", "f", {0.1}});
+    tree.apply("/level", {core::Value(0.1)});
     pump(app, [&] { return false; }, 150);
     CHECK(heard.empty());
     ws.sendTextMessage(QString::fromUtf8(command("LISTEN", "/level")));
     pump(app, [&] { return false; }, 150);
-    tree.apply({"/level", "f", {0.25}});
+    tree.apply("/level", {core::Value(0.25)});
     pump(app, [&] { return !heard.empty(); });
     CHECK(heard.size() == 1 && heard[0].address == "/level" && heard[0].types == "f" && std::abs(heard[0].args.value(0).toDouble() - 0.25) < 1e-6);
     // Only that address: a signal nobody listens to is not sent
-    tree.fire("/detect/peak", {0.9});
+    tree.fire("/detect/peak", {core::Value(0.9)});
     pump(app, [&] { return false; }, 150);
     CHECK(heard.size() == 1);
     ws.sendTextMessage(QString::fromUtf8(command("LISTEN", "/detect/peak")));
     pump(app, [&] { return false; }, 150);
-    tree.fire("/detect/peak", {0.9});
+    tree.fire("/detect/peak", {core::Value(0.9)});
     pump(app, [&] { return heard.size() >= 2; });
     CHECK(heard.size() == 2 && heard[1].address == "/detect/peak");
     // IGNORE stops it
     ws.sendTextMessage(QString::fromUtf8(command("IGNORE", "/level")));
     pump(app, [&] { return false; }, 150);
-    tree.apply({"/level", "f", {0.4}});
+    tree.apply("/level", {core::Value(0.4)});
     pump(app, [&] { return false; }, 150);
     CHECK(heard.size() == 2);
 
@@ -106,7 +106,7 @@ int main(int argc, char **argv)
     CHECK(removed["COMMAND"] == "PATH_REMOVED" && removed["DATA"] == "/layer/1/mode");
     texts.clear();
     // Too much at once, or everything gone: PATH_CHANGED, the highest path that changed
-    for (int k = 0; k < 100; ++k) tree.add(QStringLiteral("/bulk/%1").arg(k));
+    for (int k = 0; k < 100; ++k) tree.add("/bulk/" + std::to_string(k));
     pump(app, [&] { return !texts.isEmpty(); });
     pump(app, [&] { return false; }, 150);
     const QJsonObject changed = QJsonDocument::fromJson(texts.value(0).toUtf8()).object();

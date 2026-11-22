@@ -2,6 +2,8 @@
 
 #include <QCoreApplication>
 #include <QDate>
+#include <memory>
+#include <vector>
 #include <cstdio>
 #include <limits>
 
@@ -71,6 +73,31 @@ int main(int argc, char **argv)
     CHECK(convert::jsonObjectFromText("[1]").isEmpty());
     CHECK(convert::jsonArrayFromText("[1,\"a\"]") == expectedArray);
     CHECK(convert::jsonArrayFromText("nope").isEmpty());
+
+    // The values of parameters in a file, by address
+    {
+        double level = 0.5;
+        bool on = true;
+        std::string mode = "b";
+        std::vector<std::unique_ptr<core::tree::Parameter>> params;
+        auto add = [&](const char *path, core::tree::ParamInfo::Type type) { params.push_back(std::make_unique<core::tree::Parameter>(path, path, type)); return params.back().get(); };
+        add("level", core::tree::ParamInfo::Type::Float)->range(0, 1).bind([&] { return core::Value(level); }, [&](const core::Value &v) { level = v.number().value_or(0.0); });
+        add("on", core::tree::ParamInfo::Type::Bool)->bind([&] { return core::Value(on); }, [&](const core::Value &v) { on = v.truthy(); });
+        auto *choice = add("mode", core::tree::ParamInfo::Type::Choice);
+        choice->choices({"a", "b"}).bind([&] { return core::Value(mode); }, [&](const core::Value &v) { mode = v.text(); });
+        add("go", core::tree::ParamInfo::Type::Trigger)->bind([] { return core::Value(); }, [](const core::Value &) {});
+        add("meter", core::tree::ParamInfo::Type::Float)->readOnly().bind([] { return core::Value(1.0); }, [](const core::Value &) {});
+        const QJsonObject saved = convert::parametersToJson(params);
+        CHECK(saved.size() == 3 && saved["level"] == 0.5 && saved["on"] == true && saved["mode"] == "b"); // not the trigger, not the meter
+        level = 0.9; on = false; mode = "a";
+        QJsonObject unknown;
+        QJsonObject file = saved;
+        file["gone"] = 1;
+        convert::parametersFromJson(params, file, &unknown);
+        CHECK(level == 0.5 && on && mode == "b" && unknown.size() == 1 && unknown.contains("gone"));
+        CHECK(convert::toJson(core::Value(7)) == QJsonValue(7) && convert::toJson(core::Value()).isNull() && convert::fromJson(QJsonValue(true)) == core::Value(true));
+        CHECK(convert::fromJson(QJsonValue("t")) == core::Value("t") && convert::fromJson(QJsonValue(QJsonObject())).isNil() && convert::fromJson(QJsonValue(2.5)) == core::Value(2.5));
+    }
 
     return failures ? 1 : 0;
 }

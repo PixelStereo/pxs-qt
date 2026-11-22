@@ -1,11 +1,14 @@
 #include <pxs/OscService.h>
+#include <pxs/Convert.h>
+#include <pxs/core/tree/oscquery.h>
+#include <pxs/core/tree/osc_bridge.h>
 
 #include <QJsonDocument>
 #include <QThread>
 
 namespace pxs {
 
-OscService::OscService(Tree *tree, const QString &name, QObject *parent)
+OscService::OscService(core::tree::Tree *tree, const QString &name, QObject *parent)
     : QObject(parent), m_tree(tree), m_name(name), m_http(tree, this), m_mdns(this)
 {
     m_http.setName(name);
@@ -37,16 +40,16 @@ bool OscService::start(quint16 oscPort, quint16 httpPort, bool announce)
         m_udp.close();
         return false;
     }
-    QJsonObject extensions = Tree::defaultExtensions();
+    QJsonObject extensions = convert::jsonObjectFromText(core::tree::defaultExtensionsJson());
     extensions["LISTEN"] = true;       // the WebSocket of the same port (IGNORE comes with it)
     extensions["PATH_CHANGED"] = true;
     extensions["PATH_ADDED"] = true;
     extensions["PATH_REMOVED"] = true;
     m_http.setExtensions(extensions);
     m_http.setHostInfoMore(QJsonObject{{"WS_PORT", int(m_http.port())}});
-    m_tree->setOutput([this](const osc::Message &m) { send(m); });
-    m_observer = m_tree->addObserver([this](const Node &n, const QVariantList &args) { onChanged(n, args); });
-    m_tree->setStructureObserver([this](const QString &path, Tree::Change change) { onStructure(path, change); });
+    m_tree->setOutput([this](const core::osc::Message &m) { send(m); });
+    m_observer = m_tree->addObserver([this](const core::tree::Node &n, const core::ValueList &args) { onChanged(n, args); });
+    m_tree->setStructureObserver([this](const std::string &path, core::tree::Tree::Change change) { onStructure(path, change); });
     if (announce) {
         const QString type = QStringLiteral("_oscjson._tcp");
         m_mdns.start(m_name, {{type, m_http.port()}, {QStringLiteral("_osc._udp"), m_udp.localPort()}});
@@ -90,29 +93,32 @@ void OscService::onReadyRead()
 
 void OscService::apply(const QByteArray &packet, const QHostAddress *from, quint16 port)
 {
-    std::vector<osc::Message> messages;
-    if (!osc::decode(packet, messages)) return;
+    std::vector<core::osc::Message> messages;
+    if (!core::osc::decode(reinterpret_cast<const std::uint8_t *>(packet.constData()), std::size_t(packet.size()), messages)) return;
     if (from && m_learn && !m_learned.contains({*from, port})) m_learned.append({*from, port}); // hears the feedback
-    for (const osc::Message &m : messages) emit messageReceived(m, m_tree->apply(m));
+    for (const core::osc::Message &m : messages) emit messageReceived(convert::fromCore(m), m_tree->apply(m));
 }
 
 // What a client that listens to an address is sent: the message a parameter says it holds, or the signal as it was fired
-void OscService::onChanged(const Node &node, const QVariantList &args)
+void OscService::onChanged(const core::tree::Node &node, const core::ValueList &args)
 {
     if (m_webSockets.load() == 0 || node.isContainer()) return;
-    osc::Message m;
-    if (node.kind() == Kind::Parameter) {
-        m = Tree::message(node);
-    } else if (node.kind() == Kind::Signal) {
+    core::osc::Message m;
+    if (node.kind() == core::tree::Kind::Parameter) {
+        m = core::tree::Tree::message(node);
+    } else if (node.kind() == core::tree::Kind::Signal) {
         m.address = node.path();
-        if (node.type != QLatin1String("N")) {
+        if (node.type != "N") {
             m.types = node.type;
-            m.args = args;
+            m.args = core::tree::toOscArguments(node.type, args);
         }
     } else {
         return; // an action is received, it does not say anything
     }
-    const auto stream = [this, m] { m_http.stream(m.address, osc::encode(m)); };
+    const QString address = convert::fromUtf8(m.address);
+    const core::osc::Bytes bytes = core::osc::encode(m);
+    const QByteArray packet(reinterpret_cast<const char *>(bytes.data()), qsizetype(bytes.size()));
+    const auto stream = [this, address, packet] { m_http.stream(address, packet); };
     if (QThread::currentThread() == thread()) stream();
     else QMetaObject::invokeMethod(this, stream, Qt::QueuedConnection); // a socket is written by its own thread
 }
@@ -128,9 +134,10 @@ static QString commonPath(const QString &a, const QString &b)
 
 static bool isUnder(const QString &path, const QString &parent) { return path.startsWith(parent == QLatin1String("/") ? parent : parent + '/'); }
 
-void OscService::onStructure(const QString &path, Tree::Change change)
+void OscService::onStructure(const std::string &where, core::tree::Tree::Change change)
 {
     if (m_webSockets.load() == 0) return;
+    const QString path = convert::fromUtf8(where);
     const auto note = [this, path, change] {
         m_pending.append({path, change});
         if (!m_pathTimer.isActive()) m_pathTimer.start(); // a layer made of dozens of nodes is one message
@@ -150,7 +157,7 @@ void OscService::onPathTimer()
     bool all = pending.size() > kMostMessages;
     QString common;
     for (const auto &c : pending) {
-        all |= c.second == Tree::Change::Cleared;
+        all |= c.second == core::tree::Tree::Change::Cleared;
         common = commonPath(common, c.first);
     }
     const auto send = [this](const QJsonObject &o) { m_http.broadcast(QJsonDocument(o).toJson(QJsonDocument::Compact)); };
@@ -164,8 +171,8 @@ void OscService::onPathTimer()
         for (int j = 0; j < pending.size() && !covered; ++j)
             covered = j != k && pending[j].second == pending[k].second && isUnder(path, pending[j].first);
         if (covered) continue;
-        if (pending[k].second == Tree::Change::Added) {
-            QJsonObject node = m_tree->json(path);
+        if (pending[k].second == core::tree::Tree::Change::Added) {
+            QJsonObject node = convert::jsonObjectFromText(core::tree::describeJson(*m_tree, convert::toUtf8(path)));
             if (node.isEmpty()) continue; // gone again before it was said
             node["COMMAND"] = "PATH_ADDED";
             node["DATA"] = path;
@@ -176,13 +183,14 @@ void OscService::onPathTimer()
     }
 }
 
-void OscService::send(const osc::Message &message)
+void OscService::send(const core::osc::Message &message)
 {
     if (m_udp.state() != QAbstractSocket::BoundState) return;
-    const QByteArray packet = osc::encode(message);
+    const core::osc::Bytes bytes = core::osc::encode(message);
+    const QByteArray packet(reinterpret_cast<const char *>(bytes.data()), qsizetype(bytes.size()));
     for (const auto &t : m_targets) m_udp.writeDatagram(packet, t.first, t.second);
-    const Node *node = m_tree->find(message.address);
-    if (node && node->kind() == Kind::Signal) return; // a stream goes to the targets only
+    const core::tree::Node *node = m_tree->find(message.address);
+    if (node && node->kind() == core::tree::Kind::Signal) return; // a stream goes to the targets only
     for (const auto &t : m_learned)
         if (!m_targets.contains(t)) m_udp.writeDatagram(packet, t.first, t.second);
 }
