@@ -85,6 +85,13 @@ set_target_properties(pxs_bind PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_include_directories(pxs_bind PUBLIC src/bind)
 target_link_libraries(pxs_bind PUBLIC pxs::tree pxs::widgets)
 
+# The bridge to pxs-core's portable types (QVariant <-> Value, QString <-> UTF-8, QJson <-> JSON text, the OSC message of the Qt API <-> pxs-core's):
+# what an application that moves to pxs::core::tree uses at its edges. Its header names pxs-core's types, so pxs-core is PUBLIC here.
+add_library(pxs_convert STATIC src/convert/Convert.cpp src/convert/pxs/Convert.h)
+add_library(pxs::convert ALIAS pxs_convert)
+target_include_directories(pxs_convert PUBLIC src/convert)
+target_link_libraries(pxs_convert PUBLIC pxs::osc pxs-core::value pxs-core::osc Qt6::Core)
+
 # Controls: the model of a control (kinds, JSON, its place on the page) and the page an application serves for them: a free grid,
 # pages for the groups, Edit mode, SVG widgets, and the server (HTTP and WebSocket) that gives a page its controls. Qt Core and Network.
 add_library(pxs_controls STATIC src/controls/Server.cpp src/controls/ControlList.cpp src/controls/pxs/ControlList.h src/controls/pxs/Server.h src/controls/pxs/Control.h src/controls/pxs/Physics.h src/controls/pxs/ControlsPage.h)
@@ -218,6 +225,13 @@ if(PXS_BUILD_TESTS)
     add_executable(pxs_tree_test test/tree_test.cpp)
     target_link_libraries(pxs_tree_test PRIVATE pxs::tree)
     add_test(NAME tree COMMAND pxs_tree_test)
+    add_executable(pxs_convert_test test/convert_test.cpp)
+    target_link_libraries(pxs_convert_test PRIVATE pxs::convert)
+    add_test(NAME convert COMMAND pxs_convert_test)
+    # The Qt tree above and pxs-core's, side by side on random trees and OSC traffic: the Qt tree is the reference until it is replaced
+    add_executable(pxs_tree_differential_test test/tree_differential_test.cpp)
+    target_link_libraries(pxs_tree_differential_test PRIVATE pxs::tree pxs-core::tree)
+    add_test(NAME tree_differential COMMAND pxs_tree_differential_test strict 150)
     add_executable(pxs_preset_test test/preset_test.cpp)
     target_link_libraries(pxs_preset_test PRIVATE pxs::tree)
     add_test(NAME preset COMMAND pxs_preset_test)
