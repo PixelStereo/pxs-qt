@@ -855,5 +855,5 @@ inline constexpr char kScriptF[] = R"JS(
   }
 )JS";
 
-inline QByteArray script() { return QByteArray(kScriptA) + kScriptB + kScriptB2 + kScriptC + kScriptD + kScriptE + kScriptF; }
+inline QByteArray script() { return QByteArray(kScriptA) + kScriptB + kScriptB2 + kScriptC + kScriptD + kScriptF + kScriptE; }
 } // namespace pxs::controls::page
