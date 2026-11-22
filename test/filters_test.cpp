@@ -100,6 +100,15 @@ int main()
     check(run.input(2, QJsonArray{stage("clamp", 0.2, 0.8, false)}, 1.0).value_or(-1) == 1.0, "a stage that is off lets it through");
     check(!run.input(3, clamp, std::nan("")).has_value(), "no number, nothing");
 
+    // What each stage made of the value, to show in the inspector
+    {
+        FilterRunner tr;
+        check(!tr.trace(5).has_value(), "nothing set: no trace");
+        tr.input(5, QJsonArray{stage("clamp", 0.2, 0.8), stage("clamp", 0.3, 0.5)}, 1.0);
+        const auto t = tr.trace(5);
+        check(t && t->in == 1.0 && t->stages.size() == 2 && t->stages[0] == 0.8 && t->stages[1] == 0.5, "the value after each stage");
+    }
+
     // Over time: a smoothing starts where the value is, then follows it, and stops when it got there
     FilterRunner slow;
     const QJsonArray smooth{stage("weighted_average", 0.3)};

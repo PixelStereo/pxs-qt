@@ -107,6 +107,9 @@ input[type=color] { width:100%; height:100%; min-height:40px; max-height:80px; b
 .pad::before, .pad::after { content:""; position:absolute; background:#34343d; }
 .pad::before { left:50%; top:0; bottom:0; width:1px; } .pad::after { top:50%; left:0; right:0; height:1px; }
 .pad i.pt { display:flex; align-items:center; justify-content:center; font:700 12px -apple-system, system-ui, sans-serif; color:#14141a; background:#f2f2f5; border-color:hsl(var(--h),70%,60%); box-shadow:0 0 12px hsl(var(--h),70%,60%); pointer-events:none; }
+.nf { flex:none; min-width:16px; height:16px; padding:0 4px; margin-left:6px; border-radius:8px; background:var(--acc); color:#06222a; font-size:10px; font-weight:700; line-height:16px; text-align:center; box-sizing:border-box; }
+.tile.dropOn .face { outline:2px solid var(--acc); outline-offset:-3px; }
+body.play .shield, body.play .rz { pointer-events:none; } /* Alt held in edit mode: the tile can be played */
 .rst { flex:none; width:24px; height:24px; padding:0; margin-left:6px; border-radius:6px; border:1px solid var(--line); background:var(--panel2); color:var(--dim); font-size:14px; line-height:1; cursor:pointer; }
 .rst:active { color:var(--text); }
 .pad i.pt.col { border-color:var(--bc); box-shadow:0 0 12px var(--bc); }
@@ -238,6 +241,7 @@ inline constexpr char kScriptA[] = R"JS(
         sharedPage = !!m.sharedPage; if (sharedPage && m.page) showPageId(m.page, false);
         if (busy && Date.now() - busyAt < 4000) again = true; else { busy = 0; render(); } // a gesture that never ended must not freeze the page
       } else if (m.t === 'values') { Object.assign(values, m.v || {}); update();
+      } else if (m.t === 'stages') { if (stageHook) stageHook(m);
       } else if (m.t === 'page') { showPageId(m.id, true); }
     };
     ws.onclose = () => {
@@ -502,6 +506,10 @@ inline constexpr char kScriptC[] = R"JS(
     $('#edit').hidden = false; $('#edit').style.display = compact ? 'none' : '';
     wires();
   }
+)JS";
+
+// C2: the tile (a literal stays under the compilers' limit)
+inline constexpr char kScriptC2[] = R"JS(
   function tile(it) {
     const c = it.c, t = { it, el: el('div', 'tile' + (c.kind === 'group' ? ' sec' : '')), api: null };
     const face = el('div', 'face'), hd = el('div', 'hd'), name = el('span', '', leaf(c.name)), val = el('b');
@@ -511,7 +519,9 @@ inline constexpr char kScriptC[] = R"JS(
     face.style.setProperty('--a', c.accent || '');
     if (!c.accent) face.style.removeProperty('--a');
     hd.appendChild(name); if (c.signal) { const sg = el('span', 'sigtag', 'SIGNAL'); sg.title = 'A signal the device emits: shown here, it cannot be set'; hd.appendChild(sg); } if (c.kind === 'slider') hd.appendChild(val);
-    if (c.reset) { const rb = el('button', 'rst', '⟲'); rb.title = 'Reset to its default'; rb.onclick = e => { e.stopPropagation(); send({ t: 'reset', id: c.id }); }; hd.appendChild(rb); } // the default of what it shows, put back
+    const nf = (c.filters || []).filter(q => q.enabled !== false).length;
+    if (nf) { const nb = el('span', 'nf', String(nf)); nb.title = nf + (nf > 1 ? ' filters' : ' filter') + ' on what this tile sends'; hd.appendChild(nb); }
+    if (c.reset && !editing) { const rb = el('button', 'rst', '⟲'); rb.title = 'Reset to its default'; rb.onclick = e => { e.stopPropagation(); send({ t: 'reset', id: c.id }); }; hd.appendChild(rb); } // the default of what it shows, put back
     face.appendChild(hd);
     if (c.kind !== 'group' && c.kind !== 'toggle') {
       const bd = el('div', 'bd');
@@ -605,13 +615,21 @@ inline constexpr char kScriptC[] = R"JS(
   window.pxsPageId = () => pageId; // the page shown now (an application's front page puts what it adds there)
   const dropType = 'application/x-pxs-address';
   const droppable = e => e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], dropType) >= 0;
-  document.addEventListener('dragover', e => { if (droppable(e)) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; } });
+  let dropTile = null; // the tile an address is over: dropped there, it changes where that tile talks to (Alt: it talks to this one as well)
+  const overTile = e => { const tl = e.target && e.target.closest ? e.target.closest('.tile') : null; const id = tl ? Object.keys(tiles).find(k => tiles[k].el === tl) : null; const c = id && byId[id]; return c && c.kind !== 'group' && (c.dest || (c.targets && c.targets.length)) ? tl : null; };
+  document.addEventListener('dragover', e => { if (droppable(e)) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; const tl = editing ? overTile(e) : null; if (tl !== dropTile) { if (dropTile) dropTile.classList.remove('dropOn'); dropTile = tl; if (tl) tl.classList.add('dropOn'); } } });
+  document.addEventListener('dragleave', e => { if (!e.relatedTarget && dropTile) { dropTile.classList.remove('dropOn'); dropTile = null; } });
+  const altPlay = on => document.body.classList.toggle('play', !!on && editing); // Alt held in edit mode: the tile under the hand is played, not moved
+  document.addEventListener('keydown', e => { if (e.key === 'Alt') altPlay(true); });
+  document.addEventListener('keyup', e => { if (e.key === 'Alt') altPlay(false); });
+  window.addEventListener('blur', () => altPlay(false));
   document.addEventListener('drop', e => {
     if (!droppable(e)) return;
     e.preventDefault();
+    if (dropTile) { dropTile.classList.remove('dropOn'); dropTile = null; }
     const r = $('#grid').getBoundingClientRect(), tl = e.target && e.target.closest ? e.target.closest('.tile') : null; // a macro's tile: the address is added to it
-    const onto = tl ? Object.keys(tiles).find(k => tiles[k].el === tl) : null, macro = onto && byId[onto] && byId[onto].targets && byId[onto].targets.length;
-    send({ t: 'drop', data: e.dataTransfer.getData(dropType), onto: macro ? onto : undefined, page: String(pageId), x: compact ? 0 : clamp(Math.floor((e.clientX - r.left) / cell), 0, 11), y: compact ? 9999 : Math.max(0, Math.floor((e.clientY - r.top) / rowH)) });
+    const onto = tl ? Object.keys(tiles).find(k => tiles[k].el === tl) : null, macro = editing && onto && byId[onto] && ((byId[onto].targets && byId[onto].targets.length) || byId[onto].dest) && byId[onto].kind !== 'group';
+    send({ t: 'drop', data: e.dataTransfer.getData(dropType), onto: macro ? onto : undefined, add: macro && e.altKey ? true : undefined, page: String(pageId), x: compact ? 0 : clamp(Math.floor((e.clientX - r.left) / cell), 0, 11), y: compact ? 9999 : Math.max(0, Math.floor((e.clientY - r.top) / rowH)) });
   });
   $('#edit').onclick = () => { editing = !editing; $('#edit').classList.toggle('on', editing); document.body.classList.toggle('insp', editing && inspectorMode === 'always'); if (!editing) { closeSheet(); sel = new Set(); } render(); };
 )JS";
@@ -622,7 +640,7 @@ inline constexpr char kScriptD[] = R"JS(
   let sheetTimer = 0, sheetProps = {}, sheetFor = 0;
   const flush = () => { clearTimeout(sheetTimer); if (sheetFor && Object.keys(sheetProps).length) send({ t: 'edit', id: sheetFor, props: sheetProps }); sheetProps = {}; };
   const push = props => { sheetFor = sheetId; sheetProps = Object.assign(sheetProps, props); clearTimeout(sheetTimer); sheetTimer = setTimeout(flush, 220); };
-  function closeSheet() { flush(); sheetId = 0; $('#sheet').classList.remove('open', 'pinned'); selectTile(0); }
+  function closeSheet() { unwatch(); flush(); sheetId = 0; $('#sheet').classList.remove('open', 'pinned'); selectTile(0); }
   // In edit mode the inspector is always there (when the preferences say so): it shows the tile that is selected, or asks for one
   function inspector() {
     if (inspectorMode !== 'always') return;
@@ -678,6 +696,7 @@ inline constexpr char kScriptD[] = R"JS(
   }
   function openSheet(id) {
     const c = byId[id]; if (!c) return;
+    unwatch();
     sheetId = id; selectTile(id);
     const sh = $('#sheet'); sh.textContent = '';
     const h2 = el('h2', '', c.kind === 'group' ? 'Section' : 'Tile'), x = el('button', 'hb', 'Done'); x.onclick = closeSheet; if (inspectorMode !== 'always') h2.appendChild(x); sh.appendChild(h2);
@@ -710,6 +729,12 @@ inline constexpr char kScriptD[] = R"JS(
       say(c.curve || 1); sh.appendChild(r); sh.appendChild(hint);
       }
     }
+    if (c.dest && !(c.targets && c.targets.length) && c.kind !== 'group') { // a view of one address: who it talks to, and the way to change it
+      sh.appendChild(el('label', '', c.signal || c.ro ? 'Shows' : 'Talks to'));
+      const ad = el('div', 'addr', c.dest); ad.style.cssText = 'font:12px ui-monospace,Menlo,monospace;word-break:break-all;padding:8px;border:1px solid var(--line);border-radius:9px;background:var(--panel2)'; sh.appendChild(ad);
+      sh.appendChild(el('div', 'hint', 'It also gets its value from there (the feedback). Drop another address from the tree on this tile to change it.'));
+      if (!c.signal && !c.ro && c.kind === 'slider') { const mb = el('button', 'hb', 'Send to several addresses…'); mb.title = 'Make it a multi-target interaction: this address becomes its first target'; mb.onclick = () => { flush(); send({ t: 'multi', id: c.id }); }; mb.style.marginTop = '6px'; sh.appendChild(mb); }
+    }
     if (c.targets && c.targets.length) targetEditor(sh, c, numeric);
     if (c.kind === 'points' && c.balls && c.balls.length) ballEditor(sh, c, field, text, numeric);
     else if (c.physics) physFields(sh, c.physics, ph => push({ physics: ph }), key => { flush(); send({ t: 'physicsWidget', id: c.id, key }); });
@@ -725,6 +750,7 @@ inline constexpr char kScriptE[] = R"JS(
   // copy (Cmd/Ctrl+C), cut (X), paste (V) or delete them. The clipboard is the server's, so a tile cut here can be pasted on any page
   function showPageId(id, now) { const p = pages().find(q => String(q.id) === String(id)); if (!p) return; pageId = p.id; if (now) render(); }
   function selectionChanged() {
+    if (sel.size !== 1) unwatch();
     if (sel.size === 1) { const id = Array.from(sel)[0]; if (sheetId === id && byId[id]) markSel(); else openSheet(id); return; }
     flush(); sheetId = 0; markSel(); if (sel.size > 1) multiInspector(); else inspector();
   }
@@ -815,31 +841,87 @@ inline constexpr char kScriptE[] = R"JS(
 inline QByteArray style() { return QByteArray(kStyleA) + kStyleB; }
 // The filters of a tile: what it sends goes through them in their order (the interaction filters of pxs), each with its own settings
 inline constexpr char kScriptF[] = R"JS(
+  // What a tile sends goes through its filters, in their order. The inspector shows them: settings, a curve or an envelope drawn, and what each
+  // stage makes of the value, live (the server tells the stages of the tile that is open)
+  let stageHook = null;
+  const unwatch = () => { if (stageHook) { stageHook = null; send({ t: 'watch', id: '0' }); } };
+  function curveEditor(s, onChange, hooks) {
+    const W = 168, H = 110, P = 8, box = el('div'); box.style.cssText = 'margin:6px 0';
+    const svg = sv('svg', { viewBox: '0 0 ' + W + ' ' + H, width: '100%' }, box); svg.style.cssText = 'background:var(--panel2);border:1px solid var(--line);border-radius:9px;touch-action:none;max-width:260px;display:block';
+    const X = t => P + t * (W - 2 * P), Y = v => H - P - v * (H - 2 * P), T = x => clamp((x - P) / (W - 2 * P), 0, 1), V = y => clamp((H - P - y) / (H - 2 * P), 0, 1);
+    const keys = () => s.curve;
+    const ease = (t, k) => { switch (k | 0) { case 1: return t * t; case 2: return 1 - (1 - t) * (1 - t); case 3: return t < .5 ? 2 * t * t : 1 - 2 * (1 - t) * (1 - t); case 4: return t * t * t; case 5: return 1 - Math.pow(1 - t, 3); default: return t; } };
+    const at = x => { const k = keys(); if (!k.length) return x; if (x <= k[0].t) return k[0].v; for (let i = 0; i < k.length - 1; i++) if (x <= k[i + 1].t) { const u = (x - k[i].t) / Math.max(1e-9, k[i + 1].t - k[i].t); return k[i].v + (k[i + 1].v - k[i].v) * ease(u, k[i].curve); } return k[k.length - 1].v; };
+    const draw = () => {
+      svg.textContent = '';
+      sv('line', { x1: X(0), y1: Y(0), x2: X(1), y2: Y(1), stroke: 'var(--line)', 'stroke-dasharray': '3 3' }, svg);
+      const pts = []; for (let i = 0; i <= 60; i++) { const x = i / 60; pts.push(X(x).toFixed(1) + ',' + Y(at(x)).toFixed(1)); }
+      sv('polyline', { points: pts.join(' '), fill: 'none', stroke: 'var(--acc)', 'stroke-width': 2 }, svg);
+      keys().forEach((k, i) => {
+        const d = sv('circle', { cx: X(k.t), cy: Y(k.v), r: 6, fill: 'var(--bg)', stroke: 'var(--acc)', 'stroke-width': 2, cursor: 'grab' }, svg);
+        d.addEventListener('pointerdown', e => {
+          e.preventDefault(); e.stopPropagation(); d.setPointerCapture(e.pointerId);
+          const mv = ev => { const r = svg.getBoundingClientRect(), x = (ev.clientX - r.left) * W / r.width, y = (ev.clientY - r.top) * H / r.height; k.v = V(y); if (i > 0 && i < keys().length - 1) k.t = clamp(T(x), keys()[i - 1].t + .01, keys()[i + 1].t - .01); draw(); };
+          const up = () => { d.removeEventListener('pointermove', mv); d.removeEventListener('pointerup', up); onChange(); };
+          d.addEventListener('pointermove', mv); d.addEventListener('pointerup', up);
+        });
+        d.addEventListener('dblclick', e => { e.stopPropagation(); if (i > 0 && i < keys().length - 1) { keys().splice(i, 1); draw(); onChange(); } });
+      });
+      const live = hooks.live(); if (live) sv('circle', { cx: X(live[0]), cy: Y(live[1]), r: 3.5, fill: 'var(--acc)' }, svg);
+    };
+    svg.addEventListener('pointerdown', e => { // on the empty plane: a point is added
+      const r = svg.getBoundingClientRect(), t = T((e.clientX - r.left) * W / r.width), v = V((e.clientY - r.top) * H / r.height);
+      if (t <= .02 || t >= .98 || keys().length >= 12) return;
+      keys().push({ t, v, curve: 0 }); keys().sort((a, b) => a.t - b.t); draw(); onChange();
+    });
+    box.redraw = draw; draw(); return box;
+  }
+  function envelopeView(s) {
+    const svg = sv('svg', { viewBox: '0 0 168 60', width: '100%' }); svg.style.cssText = 'background:var(--panel2);border:1px solid var(--line);border-radius:9px;max-width:260px;display:block;margin:6px 0';
+    const poly = sv('polyline', { fill: 'none', stroke: 'var(--acc)', 'stroke-width': 2 }, svg);
+    const draw = () => {
+      const A = Math.max(1e-3, s.a), D = Math.max(1e-3, s.b), Su = clamp(s.c, 0, 1), R = Math.max(1e-3, s.d), hold = Math.max(.15 * (A + D + R), .1), tot = A + D + hold + R, k = 152 / tot, x0 = 8, y0 = 52, y1 = 8;
+      const pts = [[x0, y0], [x0 + A * k, y1], [x0 + (A + D) * k, y0 - Su * (y0 - y1)], [x0 + (A + D + hold) * k, y0 - Su * (y0 - y1)], [x0 + tot * k, y0]];
+      poly.setAttribute('points', pts.map(q => q[0].toFixed(1) + ',' + q[1].toFixed(1)).join(' '));
+    };
+    svg.redraw = draw; draw(); return svg;
+  }
   function filterEditor(sh, c) {
     const cat = filterCat, by = {}; cat.filters.forEach(f => { by[f.key] = f; });
-    let stages = (c.filters || []).map(s => Object.assign({}, s));
+    let stages = (c.filters || []).map(s => JSON.parse(JSON.stringify(s)));
     const save = () => push({ filters: stages });
+    const lo = c.kind === 'slider' ? c.min : 0, span = c.kind === 'slider' ? (c.max - c.min) || 1 : 1;
+    const shown = v => c.kind === 'slider' ? fmt(c, lo + v * span) : (v >= .5 ? 'on' : 'off');
+    let trace = null; const meters = [], curves = [];
     sh.appendChild(el('label', '', 'Filters'));
+    const rowIn = el('div', 'stage'); rowIn.style.cssText = 'display:flex;justify-content:space-between;font-size:12px;color:var(--dim);margin:0 0 6px';
+    const inLab = el('span', '', 'Value set'), inVal = el('b', '', '–'); rowIn.appendChild(inLab); rowIn.appendChild(inVal);
     const box = el('div'), pad = 'border:1px solid var(--line);border-radius:9px;padding:8px;margin:0 0 8px';
-    const stageSettings = (s, f, card) => {
+    const readout = (k, card) => { // what this stage makes of the value, live
+      const r = el('div'); r.style.cssText = 'display:flex;align-items:center;gap:8px;margin-top:6px;font-size:12px';
+      const bar = el('div'); bar.style.cssText = 'flex:1;height:6px;border-radius:3px;background:var(--panel2);overflow:hidden'; const fill = el('div'); fill.style.cssText = 'height:100%;width:0;background:var(--acc)'; bar.appendChild(fill);
+      const num = el('b', '', '–'); num.style.minWidth = '56px'; num.style.textAlign = 'right';
+      r.appendChild(el('span', '', 'After')); r.appendChild(bar); r.appendChild(num); card.appendChild(r); meters[k] = { fill, num };
+    };
+    const stageSettings = (s, f, card, onChange) => {
       let row = null;
       f.settings.forEach((st, n) => {
         if (n % 2 === 0) { row = el('div', 'row'); card.appendChild(row); }
         const d = el('div'); d.appendChild(el('label', '', st.name + (st.suffix ? ' (' + st.suffix + ')' : '')));
         const i = el('input'); i.type = 'number'; i.step = 'any'; i.inputMode = 'decimal'; i.min = st.min; i.max = st.max; i.value = s[st.id] != null ? s[st.id] : st.def;
-        i.onchange = () => { if (i.value !== '' && isFinite(Number(i.value))) { s[st.id] = Math.max(st.min, Math.min(st.max, Number(i.value))); i.value = s[st.id]; save(); } };
+        i.onchange = () => { if (i.value !== '' && isFinite(Number(i.value))) { s[st.id] = Math.max(st.min, Math.min(st.max, Number(i.value))); i.value = s[st.id]; save(); if (onChange) onChange(); } };
         d.appendChild(i); row.appendChild(d);
       });
     };
     const draw = () => {
-      box.textContent = '';
+      box.textContent = ''; meters.length = 0; curves.length = 0;
       stages.forEach((s, k) => {
         const f = by[s.type]; if (!f) return;
         const card = el('div'); card.style.cssText = pad + (s.enabled === false ? ';opacity:.55' : '');
         const head = el('div'); head.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:4px';
         const on = el('input'); on.type = 'checkbox'; on.checked = s.enabled !== false; on.title = 'On / off'; on.onchange = () => { s.enabled = on.checked; save(); draw(); };
-        const nm = el('b', '', f.name); nm.style.cssText = 'flex:1;font-size:13px';
-        const mv = (d) => () => { const j = k + d; if (j < 0 || j >= stages.length) return; const t = stages[k]; stages[k] = stages[j]; stages[j] = t; save(); draw(); };
+        const nm = el('b', '', (k + 1) + '. ' + f.name); nm.style.cssText = 'flex:1;font-size:13px';
+        const mv = d => () => { const j = k + d; if (j < 0 || j >= stages.length) return; const t = stages[k]; stages[k] = stages[j]; stages[j] = t; save(); draw(); };
         const up = el('button', 'hb', '▲'), dn = el('button', 'hb', '▼'), del = el('button', 'hb', '✕');
         up.title = 'Earlier'; dn.title = 'Later'; del.title = 'Remove this filter';
         up.onclick = mv(-1); dn.onclick = mv(1); del.onclick = () => { stages.splice(k, 1); save(); draw(); };
@@ -848,31 +930,45 @@ inline constexpr char kScriptF[] = R"JS(
         if (s.type === 'math') {
           const sel = el('select'); cat.ops.forEach(o => sel.appendChild(Object.assign(el('option', '', o.name), { value: o.key }))); sel.value = s.op || 'multiply';
           sel.onchange = () => { s.op = sel.value; save(); draw(); }; card.appendChild(el('label', '', 'Operation')); card.appendChild(sel);
-          const o = cat.ops.find(q => q.key === sel.value); if (o && !o.value) { /* no value: Abs, Floor… */ } else stageSettings(s, f, card);
+          const o = cat.ops.find(q => q.key === sel.value); if (!o || o.value) stageSettings(s, f, card);
         } else if (s.type === 'curve') {
-          const sel = el('select'); cat.curves.forEach((q, i) => sel.appendChild(Object.assign(el('option', '', q.name), { value: i })));
-          const cur = cat.curves.findIndex(q => JSON.stringify(q.curve) === JSON.stringify(s.curve)); const extra = el('option', '', 'Custom'); extra.value = -1; if (cur < 0) sel.appendChild(extra); sel.value = cur;
-          sel.onchange = () => { if (Number(sel.value) >= 0) { s.curve = cat.curves[Number(sel.value)].curve; save(); } }; card.appendChild(el('label', '', 'Shape')); card.appendChild(sel);
+          const ed = curveEditor(s, save, { live: () => trace && s.enabled !== false ? [k === 0 ? trace.in : trace.v[k - 1], trace.v[k]] : null });
+          card.appendChild(ed); curves[k] = ed;
+          card.appendChild(el('div', 'hint', 'Drag a point; click the plane to add one; double-click a point to remove it.'));
+          const sel = el('select'); sel.appendChild(Object.assign(el('option', '', 'A preset…'), { value: -1 })); cat.curves.forEach((q, i) => sel.appendChild(Object.assign(el('option', '', q.name), { value: i })));
+          sel.onchange = () => { if (Number(sel.value) >= 0) { s.curve = JSON.parse(JSON.stringify(cat.curves[Number(sel.value)].curve)); save(); draw(); } }; card.appendChild(sel);
+          const sg = el('select'); sg.appendChild(Object.assign(el('option', '', 'Segments: as they are'), { value: -1 })); ['Linear', 'Ease in', 'Ease out', 'Ease in-out', 'Cubic in', 'Cubic out'].forEach((n, i) => sg.appendChild(Object.assign(el('option', '', 'Segments: ' + n), { value: i })));
+          sg.onchange = () => { const e = Number(sg.value); if (e >= 0) { s.curve.forEach(q => { q.curve = e; }); save(); draw(); } }; card.appendChild(sg);
+        } else if (s.type === 'envelope') {
+          const ev = envelopeView(s); card.appendChild(ev); stageSettings(s, f, card, () => ev.redraw());
         } else stageSettings(s, f, card);
+        readout(k, card);
         box.appendChild(card);
       });
       if (!stages.length) box.appendChild(el('div', 'hint', 'None: the tile sends what you set.'));
+      paint();
     };
-    draw(); sh.appendChild(box);
-    if (stages.length >= cat.max) { sh.appendChild(el('div', 'hint', 'At most ' + cat.max + ' filters on a tile.')); } else {
-      const add = el('select'); add.appendChild(Object.assign(el('option', '', '+ Add a filter…'), { value: '' }));
-      const groups = {}; cat.filters.forEach(f => { (groups[f.group] = groups[f.group] || []).push(f); });
-      Object.keys(groups).forEach(g => { const og = el('optgroup'); og.label = g; groups[g].forEach(f => og.appendChild(Object.assign(el('option', '', f.name), { value: f.key }))); add.appendChild(og); });
-      add.onchange = () => {
-        const f = by[add.value]; if (!f) return; const s = { type: f.key }; f.settings.forEach(st => { s[st.id] = st.def; });
-        if (f.key === 'curve') s.curve = cat.curves[0].curve; if (f.key === 'math') s.op = 'multiply';
-        stages.push(s); save(); add.value = ''; draw();
-      };
-      sh.appendChild(add);
-    }
-    sh.appendChild(el('div', 'hint', 'In this order, on what this tile sends (0 to 1 of its range). A smoothing goes on after you let go.'));
+    const paint = () => {
+      inVal.textContent = trace ? shown(trace.in) : '–';
+      meters.forEach((m, k) => { if (!m) return; const v = trace && trace.v[k] != null ? trace.v[k] : null; m.fill.style.width = v == null ? '0' : (clamp(v, 0, 1) * 100) + '%'; m.num.textContent = v == null ? '–' : shown(v); });
+      curves.forEach(cv => { if (cv) cv.redraw(); });
+    };
+    stageHook = m => { if (String(m.id) !== String(c.id)) return; trace = { in: m.in, v: m.v || [] }; paint(); };
+    send({ t: 'watch', id: String(c.id) });
+    sh.appendChild(rowIn); draw(); sh.appendChild(box);
+    const add = el('select'); add.appendChild(Object.assign(el('option', '', '+ Add a filter…'), { value: '' }));
+    const groups = {}; cat.filters.forEach(f => { (groups[f.group] = groups[f.group] || []).push(f); });
+    Object.keys(groups).forEach(g => { const og = el('optgroup'); og.label = g; groups[g].forEach(f => og.appendChild(Object.assign(el('option', '', f.name), { value: f.key }))); add.appendChild(og); });
+    add.onchange = () => {
+      const f = by[add.value]; if (!f || stages.length >= cat.max) { add.value = ''; return; } const s = { type: f.key }; f.settings.forEach(st => { s[st.id] = st.def; });
+      if (f.key === 'curve') s.curve = JSON.parse(JSON.stringify(cat.curves[0].curve)); if (f.key === 'math') s.op = 'multiply';
+      stages.push(s); save(); add.value = ''; draw();
+    };
+    sh.appendChild(add);
+    const last = el('div', 'stage'); last.style.cssText = 'display:flex;justify-content:space-between;font-size:12px;color:var(--dim);margin:8px 0 0';
+    sh.appendChild(el('div', 'hint', 'In this order, on what this tile sends (0 to 1 of its range). A smoothing goes on after you let go. Hold Alt to play the tile while you edit, and watch each stage move.'));
   }
 )JS";
 
-inline QByteArray script() { return QByteArray(kScriptA) + kScriptB + kScriptB2 + kScriptC + kScriptD + kScriptF + kScriptE; }
+inline QByteArray script() { return QByteArray(kScriptA) + kScriptB + kScriptB2 + kScriptC + kScriptC2 + kScriptD + kScriptF + kScriptE; }
 } // namespace pxs::controls::page

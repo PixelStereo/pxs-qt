@@ -143,6 +143,13 @@ std::vector<std::pair<quint64, double>> FilterRunner::step(double dt)
     return moved;
 }
 
+std::optional<FilterTrace> FilterRunner::trace(quint64 id) const
+{
+    const auto it = m_runs.find(id);
+    if (it == m_runs.end() || !it->second.processor.level()) return std::nullopt;
+    return FilterTrace{*it->second.processor.level(), it->second.processor.stageOutputs()};
+}
+
 bool FilterRunner::active() const
 {
     return std::any_of(m_runs.begin(), m_runs.end(), [](const auto &r) { return r.second.live; });
