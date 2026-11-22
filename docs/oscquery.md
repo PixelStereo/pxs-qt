@@ -1,18 +1,20 @@
 # The address space and OSCQuery
 
-`pxs::tree` is a tree of named nodes. A node is a container, or it carries a `Parameter` (see `parameters.md`). Two things
+`pxs::core::tree::Tree` (pxs-core, no Qt; `pxs::tree` is the CMake target that brings it with the bridge to Qt's types) is a tree of named nodes. A node is a container, or it carries a `Parameter` (see `parameters.md`). Two things
 are derived from it, so nothing is written twice: what an incoming OSC message changes, and what OSCQuery says.
 
 ```cpp
-pxs::Tree tree;
-auto opacity = std::make_unique<Parameter>("/layer/1/opacity", "Opacity", Parameter::Type::Float);
+using namespace pxs::core;
+using namespace pxs::core::tree;
+Tree tree;
+auto opacity = std::make_unique<Parameter>("opacity", "Opacity", Parameter::Type::Float);
 opacity->range(0, 1).bind(get, set);
 tree.add("/layer/1/opacity", std::move(opacity)).description = "How opaque the layer is";
 
-tree.apply({"/layer/*/opacity", "f", {0.5}});   // every node the pattern names, as its access and limits allow
-tree.json();                                     // the OSCQuery JSON of the whole tree
-tree.attribute("/layer/1/opacity", "VALUE", out);  // one attribute (?VALUE); out is empty when it has no value
-pxs::Tree::message(*tree.find("/layer/1/enable")); // the OSC message that says what a parameter holds (the feedback)
+tree.apply("/layer/*/opacity", {Value(0.5)});   // every node the pattern names, as its access and limits allow
+describeJson(tree);                              // the OSCQuery JSON of the whole tree (text)
+attributeJson(tree, "/layer/1/opacity", "VALUE", out);  // one attribute (?VALUE); out is "{}" when it has no value
+Tree::message(*tree.find("/layer/1/enable"));    // the OSC message that says what a parameter holds (the feedback)
 ```
 
 ## Three kinds of leaf, the same in every application
@@ -24,10 +26,10 @@ pxs::Tree::message(*tree.find("/layer/1/enable")); // the OSC message that says 
 | **signal** (controller output) | none: the application emits it, nobody writes it | `addSignal(path, "f")`, then `fire(path, {args})` | ACCESS 1, `TYPE`, no `VALUE` |
 
 ```cpp
-tree.addAction("/show/go", "i", [&](const QVariantList &a) { goTo(a.value(0).toInt()); return true; }, "Go to a cue");
+tree.addAction("/show/go", "i", [&](const ValueList &a) { goTo(int(a.front().number().value_or(0))); return true; }, "Go to a cue");
 tree.addSignal("/detect/peak", "f", "A peak was heard");
-tree.setOutput([&](const osc::Message &m) { sendToClients(m); });  // set once, by the service that sends
-tree.fire("/detect/peak", {0.8});     // a signal goes to the output
+tree.setOutput([&](const osc::Message &m) { sendToClients(m); });   // pxs::core::osc::Message  // set once, by the service that sends
+tree.fire("/detect/peak", {Value(0.8)});     // a signal goes to the output
 tree.changed("/layer/1/opacity");     // a parameter's new value goes to the output (the feedback)
 ```
 
@@ -44,8 +46,8 @@ A node can also be filled in by hand, for an application that already has its ow
 ```cpp
 auto &xy = tree.add("/layer/1/position");
 xy.type = "ff"; xy.access = 3; xy.description = "Position";
-xy.range = {...}; xy.get = [&] { return QVariantList{x, y}; }; xy.set = [&](const QVariantList &v) { ...; return true; };
-xy.attributes["MYAPP_DEFAULT"] = [] { return QJsonValue(...); };   // an extension of OSCQuery, asked with ?MYAPP_DEFAULT
+xy.range = {...}; xy.get = [&] { return ValueList{Value(x), Value(y)}; }; xy.set = [&](const ValueList &v) { ...; return true; };
+xy.attributes["MYAPP_DEFAULT"] = [] { return std::optional<std::string>("[0.5,0.5]"); };   // JSON as text; an extension of OSCQuery, asked with ?MYAPP_DEFAULT
 ```
 
 ## What it takes from Ossia
@@ -140,7 +142,7 @@ OSCQuery HTTP side and the mDNS announcement. What the application says goes bac
 the application's own destinations), so that writing a parameter never subscribes anyone to a stream.
 
 ```cpp
-pxs::Tree tree;
+pxs::core::tree::Tree tree;
 pxs::OscService service(&tree, "MyApp");
 service.start(oscPort, httpPort);                 // 0: any free port
 ```

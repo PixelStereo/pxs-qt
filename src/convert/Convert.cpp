@@ -143,6 +143,28 @@ osc::Message fromCore(const core::osc::Message &m)
     return out;
 }
 
+QJsonValue toJson(const core::Value &v)
+{
+    using K = core::Value::Kind;
+    switch (v.kind()) {
+    case K::Boolean: return *v.get<bool>();
+    case K::Integer32: return int(*v.get<std::int32_t>());
+    case K::Integer64: return qlonglong(*v.get<std::int64_t>());
+    case K::Float: return double(*v.get<float>());
+    case K::Double: return *v.get<double>();
+    case K::String: return fromUtf8(*v.get<std::string>());
+    default: return QJsonValue(); // Nil, and what a file does not keep
+    }
+}
+
+core::Value fromJson(const QJsonValue &v)
+{
+    if (v.isBool()) return core::Value(v.toBool());
+    if (v.isDouble()) return core::Value(v.toDouble());
+    if (v.isString()) return core::Value(toUtf8(v.toString()));
+    return {};
+}
+
 std::string toJsonText(const QJsonValue &v)
 {
     // QJsonDocument holds only an object or an array: a scalar is wrapped and unwrapped

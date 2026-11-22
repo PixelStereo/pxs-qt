@@ -5,9 +5,9 @@ ISFLab, DMXPulse, Cold-Flame, MpOsc. Declare a parameter once, and it is on the 
 interface, in the presets, under the mappings. Qt 6.4+, C++17, AGPL-3.0.
 
 ```cpp
-pxs::Tree tree;
-auto opacity = std::make_unique<Parameter>("/layer/1/opacity", "Opacity", Parameter::Type::Float);
-opacity->range(0, 1).bind(get, set);
+pxs::core::tree::Tree tree;   // pxs-core: the address space has no Qt in it
+auto opacity = std::make_unique<pxs::core::tree::Parameter>("opacity", "Opacity", pxs::core::tree::Parameter::Type::Float);
+opacity->range(0, 1).bind(get, set);   // get: () -> pxs::core::Value, set: (const Value &) -> void
 tree.add("/layer/1/opacity", std::move(opacity)).description = "How opaque the layer is";
 
 pxs::OscService osc(&tree, "MyApp");

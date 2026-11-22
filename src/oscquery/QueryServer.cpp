@@ -1,5 +1,7 @@
 #include <pxs/QueryServer.h>
 #include <WebSocketFrame.h>
+#include <pxs/Convert.h>
+#include <pxs/core/tree/oscquery.h>
 
 #include <QJsonDocument>
 #include <QNetworkInterface>
@@ -30,9 +32,10 @@ QByteArray statusLine(int status)
 }
 } // namespace
 
-QueryServer::QueryServer(const Tree *tree, QObject *parent)
+QueryServer::QueryServer(const core::tree::Tree *tree, QObject *parent)
     : QObject(parent)
     , m_tree(tree)
+    , m_extensions(convert::jsonObjectFromText(core::tree::defaultExtensionsJson()))
 {
     connect(&m_server, &QTcpServer::newConnection, this, &QueryServer::onNewConnection);
 }
@@ -230,18 +233,19 @@ QueryServer::Response QueryServer::answer(const QString &method, const QByteArra
     if (path.isEmpty()) path = QStringLiteral("/");
     const QString query = url.query().toUpper();
 
-    QJsonObject json;
+    const std::string where = convert::toUtf8(path);
+    std::string json; // the answer, as JSON text
     if (query == QLatin1String("HOST_INFO")) {
-        json = Tree::hostInfo(m_name, m_oscPort, m_extensions, m_more);
+        json = core::tree::hostInfoJson(convert::toUtf8(m_name), m_oscPort, convert::toJsonText(m_extensions), convert::toJsonText(m_more));
     } else if (!query.isEmpty()) {
-        if (!m_tree->attribute(path, query, json)) {
+        if (!core::tree::attributeJson(*m_tree, where, convert::toUtf8(query), json)) {
             resp.status = 404;
             return resp;
         }
-        if (json.isEmpty()) {
-            const Node *node = m_tree->find(path);
+        if (json == "{}") {
+            const core::tree::Node *node = m_tree->find(where);
             const bool known = query == QLatin1String("FULL_PATH") || query == QLatin1String("CONTENTS") || query == QLatin1String("TYPE") ||
-                               m_extensions.value(query).toBool() || node->attributes.count(query) > 0;
+                               m_extensions.value(query).toBool() || node->attributes.count(convert::toUtf8(query)) > 0;
             // 204: a value asked of what cannot be read, or an attribute this server does not have; otherwise the node
             // has no such attribute (a container's TYPE, a signal's VALUE): an empty object
             if ((query == QLatin1String("VALUE") && !(node->access & 1)) || !known) {
@@ -250,13 +254,13 @@ QueryServer::Response QueryServer::answer(const QString &method, const QByteArra
             }
         }
     } else {
-        json = m_tree->json(path);
-        if (json.isEmpty()) {
+        json = core::tree::describeJson(*m_tree, where);
+        if (json == "{}") {
             resp.status = 404;
             return resp;
         }
     }
-    resp.body = QJsonDocument(json).toJson(QJsonDocument::Compact);
+    resp.body = QByteArray(json.data(), qsizetype(json.size()));
     return resp;
 }
 

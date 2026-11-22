@@ -5,7 +5,7 @@
 // (NyxMap: the show's parameters; the OSCQuery explorer: a remote device's).
 #include "Control.h"
 
-#include <Parameter.h> // pxs::params: ParamInfo
+#include <pxs/core/tree/parameter.h> // ParamInfo
 
 #include <QHash>
 #include <QJsonValue>
@@ -16,6 +16,8 @@
 #include <vector>
 
 namespace pxs::controls {
+
+using ParamInfo = core::tree::ParamInfo; // what a view of a parameter knows of it (pxs-core: std::string, no Qt)
 
 constexpr int kMaxControls = 256;
 

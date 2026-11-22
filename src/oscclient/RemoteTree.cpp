@@ -122,14 +122,26 @@ QStringList RemoteTree::leaves() const
     return out;
 }
 
-bool RemoteNode::toParamInfo(ParamInfo *out) const
+namespace {
+// A JSON value as the value it describes: a number, a string, a switch; nothing for the rest
+core::Value valueOf(const QJsonValue &v)
 {
+    if (v.isBool()) return core::Value(v.toBool());
+    if (v.isDouble()) return core::Value(v.toDouble());
+    if (v.isString()) return core::Value(v.toString().toStdString());
+    return {};
+}
+} // namespace
+
+bool RemoteNode::toParamInfo(core::tree::ParamInfo *out) const
+{
+    using ParamInfo = core::tree::ParamInfo;
     if (type.size() != 1) return false;
     if (kind == QLatin1String("signal") && type == QLatin1String("N")) return false; // an event with nothing to show
     ParamInfo info;
     info.signal = kind == QLatin1String("signal");
-    info.path = path;
-    info.label = name.isEmpty() ? name : name.at(0).toUpper() + name.mid(1); // "level" -> "Level"
+    info.path = path.toStdString();
+    info.label = (name.isEmpty() ? name : name.at(0).toUpper() + name.mid(1)).toStdString(); // "level" -> "Level"
     info.access = info.signal ? int(ParamInfo::Read) : access ? access : ParamInfo::ReadWrite;
     info.stored = false;
     const QChar t = type[0];
@@ -152,7 +164,7 @@ bool RemoteNode::toParamInfo(ParamInfo *out) const
             info.type = ParamInfo::Type::Text;
         } else {
             info.type = ParamInfo::Type::Choice;
-            for (const QJsonValue &v : vals) info.choices << v.toString();
+            for (const QJsonValue &v : vals) info.choices.push_back(v.toString().toStdString());
         }
     } else if (t == QLatin1Char('N')) {
         info.type = ParamInfo::Type::Trigger;
@@ -160,10 +172,10 @@ bool RemoteNode::toParamInfo(ParamInfo *out) const
     } else {
         return false;
     }
-    if (!defaultValue.isEmpty()) info.defaultValue = defaultValue[0].toVariant();
-    else if (!value.isEmpty()) info.defaultValue = value[0].toVariant();
-    if (!unit.isEmpty()) info.unit = unit[0];
-    if (!extendedType.isEmpty()) info.extendedType = extendedType[0];
+    if (!defaultValue.isEmpty()) info.defaultValue = valueOf(defaultValue[0]);
+    else if (!value.isEmpty()) info.defaultValue = valueOf(value[0]);
+    if (!unit.isEmpty()) info.unit = unit[0].toStdString();
+    if (!extendedType.isEmpty()) info.extendedType = extendedType[0].toStdString();
     *out = info;
     return true;
 }
