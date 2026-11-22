@@ -93,11 +93,11 @@ target_link_libraries(pxs_bind PUBLIC pxs::tree pxs::widgets)
 
 # Controls: the model of a control (kinds, JSON, its place on the page) and the page an application serves for them: a free grid,
 # pages for the groups, Edit mode, SVG widgets, and the server (HTTP and WebSocket) that gives a page its controls. Qt Core and Network.
-add_library(pxs_controls STATIC src/controls/Server.cpp src/controls/ControlList.cpp src/controls/pxs/ControlList.h src/controls/pxs/Server.h src/controls/pxs/Control.h src/controls/pxs/Physics.h src/controls/pxs/ControlsPage.h)
+add_library(pxs_controls STATIC src/controls/Server.cpp src/controls/ControlList.cpp src/controls/Filters.cpp src/controls/pxs/Filters.h src/controls/pxs/ControlList.h src/controls/pxs/Server.h src/controls/pxs/Control.h src/controls/pxs/Physics.h src/controls/pxs/ControlsPage.h)
 add_library(pxs::controls ALIAS pxs_controls)
 set_target_properties(pxs_controls PROPERTIES AUTOMOC ON POSITION_INDEPENDENT_CODE ON)
 target_include_directories(pxs_controls PUBLIC src/controls)
-target_link_libraries(pxs_controls PUBLIC pxs::params pxs::osc Qt6::Core Qt6::Network)
+target_link_libraries(pxs_controls PUBLIC pxs::params pxs::osc pxs::interaction Qt6::Core Qt6::Network)
 
 # DMX over the network: the frames of Art-Net and sACN, encoded and decoded. Qt Core only.
 add_library(pxs_dmx STATIC src/dmx/Dmx.cpp src/dmx/pxs/Dmx.h)
@@ -184,6 +184,9 @@ if(PXS_BUILD_TESTS)
     add_executable(pxs_osc_test test/osc_test.cpp)
     target_link_libraries(pxs_osc_test PRIVATE pxs::osc)
     add_test(NAME osc COMMAND pxs_osc_test)
+    add_executable(pxs_filters_test test/filters_test.cpp)
+    target_link_libraries(pxs_filters_test PRIVATE pxs::controls)
+    add_test(NAME filters COMMAND pxs_filters_test)
     add_executable(pxs_controls_test test/controls_test.cpp)
     target_link_libraries(pxs_controls_test PRIVATE pxs::controls)
     add_test(NAME controls COMMAND pxs_controls_test)

@@ -1,4 +1,5 @@
 #include "pxs/Server.h"
+#include "pxs/Filters.h"
 #include "pxs/Physics.h"
 #include "pxs/ControlList.h"
 #include "pxs/ControlsPage.h"
@@ -229,7 +230,8 @@ QByteArray Server::controlsMessage(const std::vector<Control> &controls) const
     QJsonArray list;
     for (const Control &c : controls) list.append(c.wireJson());
     const QString title = m_backend->title();
-    return QJsonDocument(QJsonObject{{"t", "controls"}, {"title", title.isEmpty() ? m_name : title}, {"show", hasShowPage()}, {"sizes", m_sizes}, {"inspector", m_inspector}, {"nameParts", m_nameParts}, {"sharedPage", m_sharedPage}, {"page", QString::number(m_currentPage)}, {"list", list}})
+    static const QJsonObject catalog = filterCatalog(); // what the filter editor of a tile offers
+    return QJsonDocument(QJsonObject{{"t", "controls"}, {"title", title.isEmpty() ? m_name : title}, {"show", hasShowPage()}, {"sizes", m_sizes}, {"inspector", m_inspector}, {"nameParts", m_nameParts}, {"sharedPage", m_sharedPage}, {"page", QString::number(m_currentPage)}, {"filters", catalog}, {"list", list}})
         .toJson(QJsonDocument::Compact);
 }
 
