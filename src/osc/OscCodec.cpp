@@ -1,6 +1,7 @@
 #include "OscCodec.h"
 
 #include <pxs/core/osc/codec.h>
+#include <pxs/core/osc/names.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -92,17 +93,15 @@ QByteArray encode(const Message &message)
 
 bool decode(const QByteArray &packet, std::vector<Message> &out)
 {
-    const auto *first = reinterpret_cast<const std::uint8_t *>(packet.constData());
-    pxs::core::osc::Bytes bytes;
-    if (!packet.isEmpty()) bytes.assign(first, first + packet.size());
     std::vector<pxs::core::osc::Message> portable;
-    if (!pxs::core::osc::decode(bytes, portable)) return false;
+    if (!pxs::core::osc::decode(reinterpret_cast<const std::uint8_t *>(packet.constData()), std::size_t(packet.size()), portable))
+        return false;
     for (const auto &item : portable) {
         Message message;
         message.address = QString::fromUtf8(item.address.data(), qsizetype(item.address.size()));
         message.types = QString::fromLatin1(item.types.data(), qsizetype(item.types.size()));
-        for (std::size_t i = 0; i < item.types.size(); ++i)
-            message.args << fromCore(item.types[i], item.args[i]);
+        message.args.reserve(qsizetype(item.args.size()));
+        for (std::size_t i = 0; i < item.types.size(); ++i) message.args << fromCore(item.types[i], item.args[i]);
         out.push_back(std::move(message));
     }
     return true;
@@ -118,31 +117,50 @@ bool match(const QString &pattern, const QString &address)
                                  std::string(aData ? aData : "", std::size_t(a.size())));
 }
 
-QString safeName(const QString &name)
+namespace {
+std::string utf8(const QString &s)
 {
-    QString s = name.trimmed();
-    for (QChar &c : s)
-        if (c.isSpace() || QStringLiteral("#*,/?[]{}!").contains(c)) c = '_';
-    return s.isEmpty() ? QStringLiteral("_") : s;
+    const QByteArray b = s.toUtf8();
+    return std::string(b.constData(), std::size_t(b.size()));
 }
+// Not QString::fromUtf8 alone: it drops a leading U+FEFF (a byte order mark), and a name that starts with that character
+// must come back as it went in.
+QString fromUtf8(const std::string &s)
+{
+    std::size_t bom = 0; // leading U+FEFF (EF BB BF), as many as there are
+    while (s.compare(bom * 3, 3, "\xEF\xBB\xBF") == 0 && s.size() >= (bom + 1) * 3) ++bom;
+    QString out(qsizetype(bom), QChar(0xFEFF));
+    out += QString::fromUtf8(s.data() + bom * 3, qsizetype(s.size() - bom * 3));
+    return out;
+}
+} // namespace
 
-QString SegmentNamer::take(const QString &scope, const QString &name)
+QString safeName(const QString &name) { return fromUtf8(pxs::core::osc::safeName(utf8(name))); }
+
+struct SegmentNamer::Impl {
+    pxs::core::osc::SegmentNamer namer;
+};
+
+SegmentNamer::SegmentNamer() : d(std::make_unique<Impl>()) {}
+SegmentNamer::~SegmentNamer() = default;
+SegmentNamer::SegmentNamer(const SegmentNamer &other) : d(std::make_unique<Impl>(*other.d)) {}
+SegmentNamer &SegmentNamer::operator=(const SegmentNamer &other)
 {
-    const QString base = safeName(name);
-    const QString key = scope + QLatin1Char('/') + base;
-    int k = m_used.value(key);
-    QString seg = k ? base + QStringLiteral("_%1").arg(k + 1) : base;
-    while (m_taken.contains(scope + QLatin1Char('/') + seg)) seg = base + QStringLiteral("_%1").arg(++k + 1);
-    m_used[key] = k + 1;
-    m_taken.insert(scope + QLatin1Char('/') + seg);
-    return seg;
+    if (this != &other) d = std::make_unique<Impl>(*other.d);
+    return *this;
 }
+SegmentNamer::SegmentNamer(SegmentNamer &&) noexcept = default;
+SegmentNamer &SegmentNamer::operator=(SegmentNamer &&) noexcept = default;
+
+QString SegmentNamer::take(const QString &scope, const QString &name) { return fromUtf8(d->namer.take(utf8(scope), utf8(name))); }
 
 QStringList uniqueSegments(const QStringList &names)
 {
+    std::vector<std::string> in;
+    in.reserve(std::size_t(names.size()));
+    for (const QString &n : names) in.push_back(utf8(n));
     QStringList out;
-    SegmentNamer namer;
-    for (const QString &n : names) out << namer.take(QString(), n);
+    for (const std::string &s : pxs::core::osc::uniqueSegments(in)) out << fromUtf8(s);
     return out;
 }
 

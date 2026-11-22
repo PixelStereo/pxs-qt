@@ -15,15 +15,23 @@ if(PXS_BUILD_TESTS)
     find_package(Qt6 6.4 REQUIRED COMPONENTS Test)
 endif()
 
-# The portable protocol primitives live in pxs-core. This repository keeps the
-# Qt-facing API and applications link through these compatibility targets.
-add_subdirectory(third_party/pxs-core EXCLUDE_FROM_ALL)
+# The portable wire formats (OSC, DMX, WebSocket frames) live in pxs-core, a submodule of this repository. This repository
+# keeps the Qt-facing API; each target below is an adapter over a pxs-core module, and nothing of pxs-core leaks into its
+# headers. An application that already added pxs-core itself shares that one (a second copy would define the targets twice).
+if(NOT TARGET pxs-core::osc)
+    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/pxs-core/CMakeLists.txt")
+        message(FATAL_ERROR "third_party/pxs-core is empty. It is a submodule of this repository's own submodule: run\n"
+                            "  git submodule update --init --recursive\n"
+                            "(or clone with --recurse-submodules).")
+    endif()
+    add_subdirectory(third_party/pxs-core EXCLUDE_FROM_ALL)
+endif()
 
 # OSC 1.0 codec: messages, bundles, address patterns. Qt Core only.
-add_library(pxs_osc STATIC src/osc/OscCodec.cpp src/osc/OscCodec.h src/osc/WebSocketFrame.h) # the codec of OSC, and the frames of a WebSocket
+add_library(pxs_osc STATIC src/osc/OscCodec.cpp src/osc/OscCodec.h src/osc/WebSocketFrame.cpp src/osc/WebSocketFrame.h) # the codec of OSC, and the frames of a WebSocket
 add_library(pxs::osc ALIAS pxs_osc)
 target_include_directories(pxs_osc PUBLIC src/osc)
-target_link_libraries(pxs_osc PUBLIC pxs-core::osc Qt6::Core)
+target_link_libraries(pxs_osc PUBLIC Qt6::Core PRIVATE pxs-core::osc pxs-core::websocket)
 
 # Parameters: how an application declares what can be read, written, saved and driven over OSC, and how the others
 # are told it changed (ChangeFeed). Qt Core only.
@@ -89,7 +97,7 @@ target_link_libraries(pxs_controls PUBLIC pxs::params pxs::osc Qt6::Core Qt6::Ne
 add_library(pxs_dmx STATIC src/dmx/Dmx.cpp src/dmx/pxs/Dmx.h)
 add_library(pxs::dmx ALIAS pxs_dmx)
 target_include_directories(pxs_dmx PUBLIC src/dmx)
-target_link_libraries(pxs_dmx PUBLIC Qt6::Core)
+target_link_libraries(pxs_dmx PUBLIC Qt6::Core PRIVATE pxs-core::dmx)
 
 # DMX on the network: a Monitor (Art-Net and sACN in, what each source sends, the merge of the sources) and a Transmitter. From DMXPulse.
 add_library(pxs_dmxnet STATIC src/dmx/DmxNet.cpp src/dmx/pxs/DmxNet.h)

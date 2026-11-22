@@ -2,11 +2,10 @@
 // Qt-facing OSC API: packet encoding, decoding, and address-pattern matching are implemented by pxs-core.
 
 #include <QByteArray>
-#include <QHash>
-#include <QSet>
 #include <QString>
 #include <QStringList>
 #include <QVariant>
+#include <memory>
 #include <vector>
 
 namespace osc {
@@ -32,11 +31,17 @@ QStringList uniqueSegments(const QStringList &names);
 class SegmentNamer
 {
 public:
+    SegmentNamer();
+    ~SegmentNamer();
+    SegmentNamer(const SegmentNamer &);
+    SegmentNamer &operator=(const SegmentNamer &);
+    SegmentNamer(SegmentNamer &&) noexcept;
+    SegmentNamer &operator=(SegmentNamer &&) noexcept;
     QString take(const QString &scope, const QString &name);
 
 private:
-    QHash<QString, int> m_used; // scope + base -> names given from it
-    QSet<QString> m_taken;      // scope + segment
+    struct Impl;
+    std::unique_ptr<Impl> d;
 };
 
 } // namespace osc
