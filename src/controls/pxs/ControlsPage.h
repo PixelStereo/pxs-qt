@@ -107,6 +107,8 @@ input[type=color] { width:100%; height:100%; min-height:40px; max-height:80px; b
 .pad::before, .pad::after { content:""; position:absolute; background:#34343d; }
 .pad::before { left:50%; top:0; bottom:0; width:1px; } .pad::after { top:50%; left:0; right:0; height:1px; }
 .pad i.pt { display:flex; align-items:center; justify-content:center; font:700 12px -apple-system, system-ui, sans-serif; color:#14141a; background:#f2f2f5; border-color:hsl(var(--h),70%,60%); box-shadow:0 0 12px hsl(var(--h),70%,60%); pointer-events:none; }
+.pop { position:fixed; z-index:40; min-width:210px; background:var(--panel2); border:1px solid var(--line); border-radius:11px; padding:6px; box-shadow:0 10px 28px #000a; }
+.pop .hint { padding:4px 8px; margin:0; } .pop .popi { padding:8px 10px; border-radius:8px; cursor:pointer; } .pop .popi:hover { background:var(--acc); color:#06222a; } .pop .popi small { display:block; opacity:.7; font-size:11px; }
 .nf { flex:none; min-width:16px; height:16px; padding:0 4px; margin-left:6px; border-radius:8px; background:var(--acc); color:#06222a; font-size:10px; font-weight:700; line-height:16px; text-align:center; box-sizing:border-box; }
 .tile.dropOn .face { outline:2px solid var(--acc); outline-offset:-3px; }
 body.play .shield, body.play .rz { pointer-events:none; } /* Alt held in edit mode: the tile can be played */
@@ -547,6 +549,10 @@ inline constexpr char kScriptC2[] = R"JS(
           if (!sel.has(key)) { sel = new Set([key]); }
           x0 = p.x; y0 = p.y; o = { x: it.x, y: it.y, w: it.w, h: it.h }; base = items.map(i => ({ i, x: i.x, y: i.y }));
           movers = !grab && sel.size > 1 ? items.filter(i => sel.has(String(i.c.id))) : [it];
+          if (!grab) { // a group moves with what it holds: its tiles go where it goes
+            const inside = g => { let p = g.c.group; while (p) { if (String(p) === String(it.c.id) || movers.some(m => m.c.kind === 'group' && String(m.c.id) === String(p))) return true; p = byId[p] && byId[p].group; } return false; };
+            const more = items.filter(i => movers.indexOf(i) < 0 && inside(i)); if (more.length) movers = movers.concat(more);
+          }
           busy++; busyAt = Date.now(); t.el.classList.add('moving'); selectionChanged();
         },
         move: p => {
@@ -629,7 +635,18 @@ inline constexpr char kScriptC2[] = R"JS(
     if (dropTile) { dropTile.classList.remove('dropOn'); dropTile = null; }
     const r = $('#grid').getBoundingClientRect(), tl = e.target && e.target.closest ? e.target.closest('.tile') : null; // a macro's tile: the address is added to it
     const onto = tl ? Object.keys(tiles).find(k => tiles[k].el === tl) : null, macro = editing && onto && byId[onto] && ((byId[onto].targets && byId[onto].targets.length) || byId[onto].dest) && byId[onto].kind !== 'group';
-    send({ t: 'drop', data: e.dataTransfer.getData(dropType), onto: macro ? onto : undefined, add: macro && e.altKey ? true : undefined, page: String(pageId), x: compact ? 0 : clamp(Math.floor((e.clientX - r.left) / cell), 0, 11), y: compact ? 9999 : Math.max(0, Math.floor((e.clientY - r.top) / rowH)) });
+    const data = e.dataTransfer.getData(dropType), x = compact ? 0 : clamp(Math.floor((e.clientX - r.left) / cell), 0, 11), y = compact ? 9999 : Math.max(0, Math.floor((e.clientY - r.top) / rowH));
+    let node = null; try { const l = JSON.parse(data); if (Array.isArray(l) && l.length === 1 && l[0].node && l[0].as === 'ask') node = l[0]; } catch (_) {}
+    if (node && !macro) { // a node: a group of this page (its tiles move, are cut and copied together), or a page of its own
+      const go = as => send({ t: 'drop', data: JSON.stringify([Object.assign({}, node, { as })]), page: String(pageId), x, y });
+      const pop = el('div', 'pop'); pop.style.left = Math.min(e.clientX, innerWidth - 230) + 'px'; pop.style.top = Math.min(e.clientY, innerHeight - 120) + 'px';
+      pop.appendChild(el('div', 'hint', 'Add all of it as…'));
+      [['group', 'A group on this page', 'its tiles move, copy and cut together'], ['page', 'A page of its own', 'a new tab']].forEach(o => { const b = el('div', 'popi', o[1]); b.appendChild(el('small', '', o[2])); b.onclick = () => { pop.remove(); go(o[0]); }; pop.appendChild(b); });
+      const away = ev => { if (!pop.contains(ev.target)) { pop.remove(); document.removeEventListener('pointerdown', away, true); } };
+      document.body.appendChild(pop); setTimeout(() => document.addEventListener('pointerdown', away, true), 0);
+      return;
+    }
+    send({ t: 'drop', data, onto: macro ? onto : undefined, add: macro && e.altKey ? true : undefined, page: String(pageId), x, y });
   });
   $('#edit').onclick = () => { editing = !editing; $('#edit').classList.toggle('on', editing); document.body.classList.toggle('insp', editing && inspectorMode === 'always'); if (!editing) { closeSheet(); sel = new Set(); } render(); };
 )JS";
