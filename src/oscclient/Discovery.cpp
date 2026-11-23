@@ -153,6 +153,14 @@ void Discovery::onReadyRead()
     }
 }
 
+QHostAddress Discovery::bestAddress(const QList<QHostAddress> &heard)
+{
+    // 169.254.0.0/16 is what an interface with no network gives itself (USB links, an unplugged cable): the last resort
+    for (const QHostAddress &a : heard)
+        if (!a.isLinkLocal() && !a.isLoopback()) return a;
+    return heard.isEmpty() ? QHostAddress() : heard.first();
+}
+
 void Discovery::handle(const QByteArray &packet)
 {
     const QString type = m_type.isEmpty() ? QStringLiteral("_oscjson._tcp.local") : m_type;
@@ -171,18 +179,21 @@ void Discovery::handle(const QByteArray &packet)
             m_srv.insert(r.name.toLower(), r);
             m_names.insert(r.name.toLower(), r.name);
         } else if (r.type == TypeA && r.ttl > 0) {
-            m_hosts.insert(r.name.toLower(), r.address);
+            // A host answers on each interface with that interface's address (a phone plugged in by USB adds a 169.254.x.x one):
+            // all are kept, the best is chosen below, so the device does not flip between them as the answers come.
+            QList<QHostAddress> &heard = m_hosts[r.name.toLower()];
+            if (!heard.contains(r.address)) heard.append(r.address);
         }
     }
     for (auto it = m_srv.cbegin(); it != m_srv.cend(); ++it) {
         if (!it.key().endsWith(type.toLower())) continue;
         const auto host = m_hosts.constFind(it.value().target.toLower());
-        if (host == m_hosts.cend()) continue;
+        if (host == m_hosts.cend() || host.value().isEmpty()) continue;
         Device d;
         QString instance = m_names.value(it.key(), it.key());
         d.name = instance.chopped(qMin<qsizetype>(instance.size(), type.size() + 1));
         d.host = it.value().target;
-        d.address = host.value();
+        d.address = bestAddress(host.value());
         d.port = it.value().port;
         const auto known = m_devices.constFind(it.key());
         if (known != m_devices.cend() && *known == d) continue;

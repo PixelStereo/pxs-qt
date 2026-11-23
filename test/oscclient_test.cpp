@@ -234,6 +234,31 @@ int main(int argc, char **argv)
     CHECK(discovery.devices().size() == 1);
     discovery.handle(MdnsResponder::buildResponse("Fake (studio)", "studio", {{"_oscjson._tcp", 5678}}, {}, 0));
     CHECK(lost.size() == 1 && discovery.devices().isEmpty());
+    { // a host heard on several interfaces (a phone on USB adds a 169.254 one): the routable address wins, in either order, and holds
+        for (const bool linkLocalFirst : {true, false}) {
+            Discovery d2;
+            QList<Device> seen;
+            QObject::connect(&d2, &Discovery::deviceFound, [&](const Device &x) { seen << x; });
+            const QList<QHostAddress> one = {QHostAddress("169.254.118.201")}, two = {QHostAddress("192.168.1.13")};
+            const auto answer = [](const QList<QHostAddress> &a) {
+                return MdnsResponder::buildResponse("Multi (studio)", "studio", {{"_oscjson._tcp", 5001}}, a, 120);
+            };
+            d2.handle(answer(linkLocalFirst ? one : two));
+            d2.handle(answer(linkLocalFirst ? two : one));
+            d2.handle(answer(linkLocalFirst ? one : two)); // and the answers keep coming
+            d2.handle(answer(linkLocalFirst ? two : one));
+            CHECK(d2.devices().size() == 1 && d2.devices().first().address == QHostAddress("192.168.1.13"));
+            CHECK(!seen.isEmpty() && seen.last().address == QHostAddress("192.168.1.13"));
+            // it never goes back to the link-local address once the routable one is known
+            bool back = false;
+            for (int i = 1; i < seen.size(); ++i)
+                if (seen[i - 1].address == QHostAddress("192.168.1.13") && seen[i].address != QHostAddress("192.168.1.13")) back = true;
+            CHECK(!back);
+        }
+        Discovery d3; // only a link-local address is known: better than nothing
+        d3.handle(MdnsResponder::buildResponse("Alone (studio)", "studio", {{"_oscjson._tcp", 5001}}, {QHostAddress("169.254.1.2")}, 120));
+        CHECK(d3.devices().size() == 1 && d3.devices().first().address == QHostAddress("169.254.1.2"));
+    }
     CHECK(Discovery::parse(QByteArray(7, 'x')).isEmpty() && Discovery::parse(Discovery::query("_oscjson._tcp")).isEmpty());
     QByteArray junk = hello;
     for (int i = 12; i < junk.size(); i += 7) junk[i] = char(0xC0); // pointers into nowhere: refused, no hang

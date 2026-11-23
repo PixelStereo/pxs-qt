@@ -60,7 +60,8 @@ private:
     bool m_running = false;
     QHash<QString, Device> m_devices;       // by instance name (lower case)
     QHash<QString, DnsRecord> m_srv;        // instance -> its SRV
-    QHash<QString, QHostAddress> m_hosts;   // host -> address
+    QHash<QString, QList<QHostAddress>> m_hosts; // host -> every address heard, in the order they came
+    static QHostAddress bestAddress(const QList<QHostAddress> &heard); // routable before link-local, stable among equals
     QHash<QString, QString> m_names;        // instance (lower case) -> the name as announced
     QList<QNetworkInterface> m_interfaces;
 };
