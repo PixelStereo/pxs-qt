@@ -43,12 +43,15 @@ validated** are waiting for an answer.
 |---|---|---|
 | **Node** | an element of the tree, with a name and a path (`/layer/1/opacity`) | `Node` |
 | **Branch** | a node that contains other nodes, with no value or action | `Kind::Container` |
-| **Leaf** | a node that contains nothing and does something | `Kind::Parameter`, `Action`, `Signal` |
+| **Leaf** | a node that has a value or does something (and may hold other nodes) | `Kind::Parameter`, `Action`, `Signal` |
 | **Parameter** | a leaf **with a state**: it is read, written and saved; it says when it changes | `add(path, Parameter)`, or filled in by hand |
 | **Action** | a leaf **without a state**: it is received and triggers something | `addAction` |
 | **Signal** (controller) | a leaf **without a state**: the application emits it, nobody writes it; its value is not remembered | `addSignal`, `fire` |
 
-A leaf has no children: a node that is given some becomes a branch.
+A node with a value of its own (a type or an access) is a parameter, an action or a signal, whether it holds other nodes or not: `/layer/1/color/tint` is a
+value and holds `/layer/1/color/tint/enable`. A node with neither is a branch. pxs-core decides this (`Node::isContainer()` is "has no value of its
+own"; `Node::hasValue()`), and every client reads it the same way. What a parameter must say (TYPE, ACCESS, VALUE, RANGE, DEFAULT_VALUE) is
+checked by `Tree::check()`. There is no reset address: a client resets a parameter by writing its DEFAULT_VALUE.
 A hardware controller (MIDI, sensor, incoming OSC) is a **signal**.
 
 ## The contract: what each kind of node does, the same everywhere
