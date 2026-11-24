@@ -40,13 +40,13 @@ add_library(pxs::convert ALIAS pxs_convert)
 target_include_directories(pxs_convert PUBLIC src/convert)
 target_link_libraries(pxs_convert PUBLIC pxs::osc pxs-core::tree pxs-core::value pxs-core::osc Qt6::Core)
 
-# Parameters and the address space (pxs::core::tree, in pxs-core: no Qt). These two names stay as targets so that an application's CMake does
-# not change: they bring pxs-core's tree and the bridge to Qt's types (pxs::convert). The tree, its parameters, the presets and the change
-# feed are pxs-core's: an application includes <pxs/core/tree/tree.h>, <pxs/core/tree/parameter.h>, <pxs/core/tree/preset.h> and
-# <pxs/core/feed/change_feed.h>.
-add_library(pxs_params INTERFACE)
+# Parameters and the address space live in pxs-core (pxs::core::tree: no Qt). This is their Qt face, for an application written on Qt types:
+# Parameter, ParamInfo and ChangeFeed with QString / QVariant / QJsonValue at the edge, one implementation behind them (pxs-core's).
+# An application without Qt, or one that moved to the core types, includes <pxs/core/tree/parameter.h> and does not need it.
+add_library(pxs_params STATIC src/params/Parameter.cpp src/params/pxs/Parameter.h src/params/pxs/ChangeFeed.h)
 add_library(pxs::params ALIAS pxs_params)
-target_link_libraries(pxs_params INTERFACE pxs-core::tree pxs-core::feed pxs::convert)
+target_include_directories(pxs_params PUBLIC src/params)
+target_link_libraries(pxs_params PUBLIC pxs-core::tree pxs-core::feed pxs::convert Qt6::Core)
 
 # The look: colour tokens, dark palettes, the style sheet every application shares
 add_library(pxs_theme STATIC src/theme/Theme.cpp src/theme/pxs/Theme.h)
@@ -221,6 +221,9 @@ if(PXS_BUILD_TESTS)
     add_executable(pxs_controls_server_test test/server_test.cpp)
     target_link_libraries(pxs_controls_server_test PRIVATE pxs::controls)
     add_test(NAME controls_server COMMAND pxs_controls_server_test)
+    add_executable(pxs_params_test test/params_test.cpp)
+    target_link_libraries(pxs_params_test PRIVATE pxs::params)
+    add_test(NAME params COMMAND pxs_params_test)
     add_executable(pxs_convert_test test/convert_test.cpp)
     target_link_libraries(pxs_convert_test PRIVATE pxs::convert)
     add_test(NAME convert COMMAND pxs_convert_test)
