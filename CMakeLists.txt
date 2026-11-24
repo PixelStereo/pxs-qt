@@ -4,6 +4,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 option(PXS_BUILD_TESTS "Build the pxs tests" ${PROJECT_IS_TOP_LEVEL})
+option(PXS_BUILD_EXAMPLES "Build the examples (OSCQlock, a device to test controllers on)" OFF)
 
 # Build identity helpers (pxs_build_suffix, pxs_nearest_release): include(<pxs>/cmake/PixelStereoBuildId.cmake)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
@@ -255,4 +256,8 @@ if(PXS_BUILD_TESTS)
     add_test(NAME widgets COMMAND pxs_widgets_test)
     add_test(NAME build_id COMMAND ${CMAKE_COMMAND} -DPXS_ROOT=${CMAKE_CURRENT_SOURCE_DIR}
              -P ${CMAKE_CURRENT_SOURCE_DIR}/test/build_id_test.cmake)
+endif()
+
+if(PXS_BUILD_EXAMPLES)
+    add_subdirectory(examples/oscqlock)
 endif()
