@@ -1,76 +1,79 @@
 #include "pxs/RemoteTree.h"
 
+#include <pxs/Convert.h>
+#include <pxs/core/tree/remote.h>
+
 #include <QJsonDocument>
 #include <algorithm>
 #include <cmath>
 
 namespace pxs::oscquery {
 
+// What a device says of itself is read by pxs-core (core::tree::RemoteTree): what a node is, what a parameter's range and default are, is decided
+// there, once, for every application. This keeps the Qt shape of it (QString, QJsonArray) for the applications that browse it.
 namespace {
-// The arguments of a type tag string (the brackets of an array not counted)
-int argumentCount(const QString &type)
+
+QJsonObject rangeObject(const core::tree::ArgRange &r)
 {
-    int n = 0;
-    for (QChar c : type)
-        if (c != '[' && c != ']') ++n;
-    return n;
+    QJsonObject o;
+    if (r.min) o.insert("MIN", r.min->number().value_or(0.0));
+    if (r.max) o.insert("MAX", r.max->number().value_or(0.0));
+    if (!r.vals.empty()) {
+        QJsonArray vals;
+        for (const core::Value &v : r.vals) vals.append(convert::fromUtf8(v.text()));
+        o.insert("VALS", vals);
+    }
+    return o;
 }
 
-// VALUE, RANGE, UNIT, EXTENDED_TYPE and CLIPMODE hold one entry per argument; the proposal lets a device write a single value
-// instead of an array when every argument shares it (a null stands for "none" in an array)
-QJsonArray perArgument(const QJsonValue &v, int arguments)
+QStringList strings(const std::vector<std::string> &in)
 {
-    if (v.isArray()) return v.toArray();
-    if (v.isUndefined() || v.isNull()) return {};
-    QJsonArray out;
-    for (int k = 0; k < std::max(1, arguments); ++k) out.append(v);
+    QStringList out;
+    for (const std::string &s : in) out << convert::fromUtf8(s);
     return out;
 }
 
-QStringList strings(const QJsonValue &v, int arguments)
+void fill(const core::tree::RemoteNode &c, RemoteNode *out)
 {
-    QStringList out;
-    for (const QJsonValue &e : perArgument(v, arguments)) out << (e.isString() ? e.toString() : QString());
+    out->name = convert::fromUtf8(c.name);
+    out->path = convert::fromUtf8(c.path);
+    out->type = convert::fromUtf8(c.type);
+    out->description = convert::fromUtf8(c.description);
+    out->kind = convert::fromUtf8(c.kind);
+    out->access = c.access;
+    for (const core::tree::ArgRange &r : c.range) out->range.append(rangeObject(r));
+    for (const core::Value &v : c.value) out->value.append(convert::toJson(v));
+    for (const core::Value &v : c.defaultValue) out->defaultValue.append(convert::toJson(v));
+    out->extendedType = strings(c.extendedType);
+    out->unit = strings(c.unit);
+    out->tags = strings(c.tags);
+    for (const auto &child : c.children) fill(child.second, &out->children[convert::fromUtf8(child.first)]);
+}
+
+core::tree::ArgRange argRange(const QJsonValue &v)
+{
+    core::tree::ArgRange r;
+    const QJsonObject o = v.toObject();
+    if (o.contains("MIN")) r.min = core::Value(o.value("MIN").toDouble());
+    if (o.contains("MAX")) r.max = core::Value(o.value("MAX").toDouble());
+    for (const QJsonValue &x : o.value("VALS").toArray()) r.vals.emplace_back(convert::toUtf8(x.toString()));
+    return r;
+}
+
+std::vector<std::string> utf8(const QStringList &in)
+{
+    std::vector<std::string> out;
+    for (const QString &s : in) out.push_back(convert::toUtf8(s));
     return out;
 }
 } // namespace
 
-static bool parse(const QJsonObject &o, const QString &name, RemoteNode *out, int depth)
-{
-    if (depth > 64) return false;
-    out->name = name;
-    out->path = o.value("FULL_PATH").toString();
-    out->type = o.value("TYPE").toString();
-    out->description = o.value("DESCRIPTION").toString();
-    out->resetPath = o.value("NYXMAP_RESET").toString();
-    out->access = std::clamp(o.value("ACCESS").toInt(0), 0, 3);
-    // A leaf with no value is not a parameter: one that is written is a message, one that is read is a signal
-    if (!o.contains("CONTENTS") && !o.contains("VALUE") && !out->type.isEmpty())
-        out->kind = out->access == 2 ? QStringLiteral("action") : out->access == 1 ? QStringLiteral("signal") : QString();
-    const int arguments = argumentCount(out->type);
-    out->range = perArgument(o.value("RANGE"), arguments);
-    out->value = perArgument(o.value("VALUE"), arguments);
-    out->extendedType = strings(o.value("EXTENDED_TYPE"), arguments);
-    out->unit = strings(o.value("UNIT"), arguments);
-    for (const QJsonValue &tag : o.value("TAGS").toArray()) out->tags << tag.toString();
-    out->defaultValue = perArgument(o.value("DEFAULT_VALUE"), arguments);
-    const QJsonObject contents = o.value("CONTENTS").toObject();
-    for (auto it = contents.begin(); it != contents.end(); ++it) {
-        if (!it.value().isObject()) continue;
-        RemoteNode child;
-        if (!parse(it.value().toObject(), it.key(), &child, depth + 1)) return false;
-        if (child.path.isEmpty()) child.path = (out->path == QLatin1String("/") ? QString() : out->path) + QLatin1Char('/') + it.key();
-        out->children.emplace(it.key(), std::move(child));
-    }
-    return true;
-}
-
 bool RemoteTree::load(const QJsonObject &root)
 {
+    core::tree::RemoteTree parsed;
+    if (!parsed.load(convert::toJsonText(root))) return false;
     RemoteNode node;
-    if (!root.contains("FULL_PATH") && !root.contains("CONTENTS")) return false;
-    if (!parse(root, QString(), &node, 0)) return false;
-    if (node.path.isEmpty()) node.path = QStringLiteral("/");
+    fill(parsed.root(), &node);
     m_root = std::move(node);
     m_loaded = true;
     return true;
@@ -122,62 +125,19 @@ QStringList RemoteTree::leaves() const
     return out;
 }
 
-namespace {
-// A JSON value as the value it describes: a number, a string, a switch; nothing for the rest
-core::Value valueOf(const QJsonValue &v)
-{
-    if (v.isBool()) return core::Value(v.toBool());
-    if (v.isDouble()) return core::Value(v.toDouble());
-    if (v.isString()) return core::Value(v.toString().toStdString());
-    return {};
-}
-} // namespace
-
 bool RemoteNode::toParamInfo(core::tree::ParamInfo *out) const
 {
-    using ParamInfo = core::tree::ParamInfo;
-    if (type.size() != 1) return false;
-    if (kind == QLatin1String("signal") && type == QLatin1String("N")) return false; // an event with nothing to show
-    ParamInfo info;
-    info.signal = kind == QLatin1String("signal");
-    info.path = path.toStdString();
-    info.label = (name.isEmpty() ? name : name.at(0).toUpper() + name.mid(1)).toStdString(); // "level" -> "Level"
-    info.access = info.signal ? int(ParamInfo::Read) : access ? access : ParamInfo::ReadWrite;
-    info.stored = false;
-    const QChar t = type[0];
-    const QJsonObject r = range.isEmpty() ? QJsonObject() : range[0].toObject();
-    if (t == QLatin1Char('f') || t == QLatin1Char('d') || t == QLatin1Char('i') || t == QLatin1Char('h')) {
-        info.type = t == QLatin1Char('f') || t == QLatin1Char('d') ? ParamInfo::Type::Float : ParamInfo::Type::Int;
-        const bool bounded = r.contains("MIN") && r.contains("MAX") && r.value("MAX").toDouble() > r.value("MIN").toDouble();
-        info.min = bounded ? r.value("MIN").toDouble() : 0;
-        info.max = bounded ? r.value("MAX").toDouble() : 1;
-        info.lo = info.min;
-        info.hi = info.max;
-        info.unbounded = !bounded;
-        info.step = info.type == ParamInfo::Type::Int ? 1 : (info.max - info.min) / 100.0;
-        info.animatable = true;
-    } else if (t == QLatin1Char('T') || t == QLatin1Char('F')) {
-        info.type = ParamInfo::Type::Bool;
-    } else if (t == QLatin1Char('s')) {
-        const QJsonArray vals = r.value("VALS").toArray();
-        if (vals.isEmpty()) {
-            info.type = ParamInfo::Type::Text;
-        } else {
-            info.type = ParamInfo::Type::Choice;
-            for (const QJsonValue &v : vals) info.choices.push_back(v.toString().toStdString());
-        }
-    } else if (t == QLatin1Char('N')) {
-        info.type = ParamInfo::Type::Trigger;
-        info.action = true;
-    } else {
-        return false;
-    }
-    if (!defaultValue.isEmpty()) info.defaultValue = valueOf(defaultValue[0]);
-    else if (!value.isEmpty()) info.defaultValue = valueOf(value[0]);
-    if (!unit.isEmpty()) info.unit = unit[0].toStdString();
-    if (!extendedType.isEmpty()) info.extendedType = extendedType[0].toStdString();
-    *out = info;
-    return true;
+    core::tree::RemoteNode c;
+    c.name = convert::toUtf8(name);
+    c.path = convert::toUtf8(path);
+    c.type = convert::toUtf8(type);
+    c.kind = convert::toUtf8(kind);
+    c.access = access;
+    for (const QJsonValue &r : range) c.range.push_back(argRange(r));
+    for (const QJsonValue &v : defaultValue) c.defaultValue.push_back(convert::fromJson(v));
+    c.unit = utf8(unit);
+    c.extendedType = utf8(extendedType);
+    return c.toParamInfo(out);
 }
 
 } // namespace pxs::oscquery

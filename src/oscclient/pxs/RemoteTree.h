@@ -17,18 +17,19 @@ struct RemoteNode {
     QString type;        // OSC type tags, one per argument; empty for a container
     QString description;
     QString kind;        // "action" (written, no value), "signal" (read, no value), or empty (a parameter, or a container)
-    QString resetPath;   // NYXMAP_RESET: the address that puts the parameter's default back (a trigger of the same device); empty: none
     int access = 0;      // 0 none (a container), 1 read, 2 write, 3 both
     QJsonArray range;    // one entry per argument: {"MIN","MAX"} or {"VALS"}
     QJsonArray value;    // the last one known, one entry per argument (empty: none known)
     QStringList extendedType; // EXTENDED_TYPE, one per argument ("" for none): "color.rgb.r", "filepath"…
     QStringList unit;         // UNIT, one per argument ("" for none): "distance.m"
     QStringList tags;         // TAGS
-    QJsonArray defaultValue;  // DEFAULT_VALUE (libossia's name): what a reset puts back, one entry per argument
+    QJsonArray defaultValue;  // DEFAULT_VALUE: what a reset writes, one entry per argument (empty: none announced)
     std::map<QString, RemoteNode> children;
 
-    bool isContainer() const { return type.isEmpty() && access == 0; }
-    bool isLeaf() const { return !type.isEmpty() || access != 0; }
+    // pxs-core's rule (core::tree::RemoteNode::hasValue): a type or an access is a value, whether the node holds other nodes or not
+    bool hasValue() const { return !type.isEmpty() || access != 0; }
+    bool isContainer() const { return !hasValue(); }
+    bool isLeaf() const { return hasValue(); }
     // As one parameter: false when it has no type or several arguments (a leaf of one argument only)
     bool toParamInfo(core::tree::ParamInfo *out) const;
 };
