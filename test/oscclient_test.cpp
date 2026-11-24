@@ -54,11 +54,15 @@ int main(int argc, char **argv)
     RemoteTree remote;
     CHECK(!remote.load(QJsonObject{{"nope", 1}}));
     CHECK(remote.load(convert::jsonObjectFromText(core::tree::describeJson(tree))));
-    { // a device that says how a parameter is reset (NYXMAP_RESET)
-        pxs::oscquery::RemoteTree withReset;
-        const QJsonObject doc{{"FULL_PATH", "/"}, {"CONTENTS", QJsonObject{{"a", QJsonObject{{"FULL_PATH", "/a"}, {"TYPE", "f"}, {"ACCESS", 3}, {"NYXMAP_RESET", "/a/reset"},
-                                       {"CONTENTS", QJsonObject{{"reset", QJsonObject{{"FULL_PATH", "/a/reset"}, {"TYPE", "N"}, {"ACCESS", 2}}}}}}}}}};
-        CHECK(withReset.load(doc) && withReset.find("/a") && withReset.find("/a")->resetPath == "/a/reset" && withReset.find("/a/reset"));
+    { // a value that holds a node is a parameter (pxs-core's rule), and a reset is writing its DEFAULT_VALUE
+        pxs::oscquery::RemoteTree holds;
+        const QJsonObject doc{{"FULL_PATH", "/"}, {"CONTENTS", QJsonObject{{"a", QJsonObject{{"FULL_PATH", "/a"}, {"TYPE", "f"}, {"ACCESS", 3}, {"VALUE", QJsonArray{0.5}},
+                                       {"DEFAULT_VALUE", QJsonArray{0.25}}, {"RANGE", QJsonArray{QJsonObject{{"MIN", 0}, {"MAX", 2}}}},
+                                       {"CONTENTS", QJsonObject{{"enable", QJsonObject{{"FULL_PATH", "/a/enable"}, {"TYPE", "T"}, {"ACCESS", 3}}}}}}}}}};
+        CHECK(holds.load(doc) && holds.find("/a") && holds.find("/a")->isLeaf() && !holds.find("/a")->isContainer() && holds.find("/a/enable"));
+        core::tree::ParamInfo info;
+        CHECK(holds.find("/a")->toParamInfo(&info) && info.max == 2 && info.defaultValue.number().value_or(9) == 0.25);
+        CHECK(holds.leaves() == QStringList({"/a", "/a/enable"}));
     }
     { // what the proposal lets a device write: one value for every argument, a null for "none", units and what an argument is
         pxs::oscquery::RemoteTree shorthand;
