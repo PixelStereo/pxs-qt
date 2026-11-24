@@ -140,7 +140,7 @@ struct Control {
     // "2.friction"): it has no value of its own, it shows the setting and sets it
     quint64 physTarget = 0;
     QString physKey;
-    QStringList resets;  // derived, not kept: the addresses that put the defaults of what it is a view of back (the application tells); the tile shows a reset button
+    bool canReset = false; // derived, not kept: what it is a view of announces a DEFAULT_VALUE (a reset is writing it, the application does); the tile shows a reset button
     bool ownRange = false; // a view of a parameter whose range (Min, Max, Step) is the tile's own, set by the operator: the parameter's is only a limit
     bool readOnly = false; // what it shows cannot be set (a parameter that is only read): drawn with any widget, never moved
     bool signal = false; // what it shows is a signal the device emits (no value of its own): shown, never set
@@ -451,7 +451,7 @@ struct Control {
         if (readOnly) o["ro"] = true;
         if (ownRange) o["ownRange"] = true;
         if (!targets.empty()) o["dest"] = QString("%1 target%2").arg(targets.size()).arg(targets.size() == 1 ? "" : "s");
-        if (!resets.isEmpty()) o["reset"] = true;
+        if (canReset) o["reset"] = true;
         if (!targets.empty()) {
             QJsonArray list;
             for (const Target &t : targets)
