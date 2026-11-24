@@ -22,6 +22,7 @@
 #include <QVariant>
 #include <QVariantList>
 
+#include <functional>
 #include <string>
 
 namespace pxs::convert {
@@ -55,6 +56,17 @@ QJsonArray jsonArrayFromText(const std::string &text);
 // A value as a file keeps it (a project, a snapshot): a number, a switch, a text; null for what has none. Back: what a parameter stores.
 QJsonValue toJson(const core::Value &v);
 core::Value fromJson(const QJsonValue &v); // null, undefined, an object or an array: Nil
+
+// A node's getter and setter written on Qt types (a QVariantList), as the node says them (pxs-core's values): one conversion in each
+// direction, so that the code that makes the nodes keeps the types of the application that owns the value.
+inline std::function<core::ValueList()> getter(std::function<QVariantList()> f)
+{
+    return [f] { return toValues(f()); };
+}
+inline std::function<bool(const core::ValueList &)> setter(std::function<bool(const QVariantList &)> f)
+{
+    return [f](const core::ValueList &v) { return f(toVariants(v)); };
+}
 
 // The values of a holder's parameters in a file, by address (only those that are stored: read and written, not an action); read back in
 // their order, an address the holder no longer has going to `unknown`, when given. `List` holds pointers (raw or smart) to
