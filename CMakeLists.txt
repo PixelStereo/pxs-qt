@@ -97,7 +97,7 @@ add_library(pxs_controls STATIC src/controls/Server.cpp src/controls/ControlList
 add_library(pxs::controls ALIAS pxs_controls)
 set_target_properties(pxs_controls PROPERTIES AUTOMOC ON POSITION_INDEPENDENT_CODE ON)
 target_include_directories(pxs_controls PUBLIC src/controls)
-target_link_libraries(pxs_controls PUBLIC pxs::params pxs::osc pxs::interaction Qt6::Core Qt6::Network)
+target_link_libraries(pxs_controls PUBLIC pxs::params pxs::osc pxs::interaction pxs-core::physics Qt6::Core Qt6::Network)
 
 # DMX over the network: the frames of Art-Net and sACN, encoded and decoded. Qt Core only.
 add_library(pxs_dmx STATIC src/dmx/Dmx.cpp src/dmx/pxs/Dmx.h)
