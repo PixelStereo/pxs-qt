@@ -703,7 +703,8 @@ std::pair<double, double> FilterEditor::spanAfter(const FilterChain &chain, doub
         case InteractionFilter::Toggle:
         case InteractionFilter::PulseDetection:
         case InteractionFilter::Envelope:
-        case InteractionFilter::Speed: span = {0.0, 1.0}; break;
+        case InteractionFilter::Speed:
+        case InteractionFilter::Physics: span = {0.0, 1.0}; break;
         default: break;
         }
     }

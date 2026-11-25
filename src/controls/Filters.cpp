@@ -17,7 +17,7 @@ std::vector<InteractionStage> stagesOf(const QJsonArray &filters)
 
 // The filters as the editor lists them, by group (their group and what they do are pxs-core's)
 const InteractionFilter kOrder[] = {
-    InteractionFilter::Average, InteractionFilter::WeightedAverage, InteractionFilter::AttackRelease, InteractionFilter::Damper,
+    InteractionFilter::Average, InteractionFilter::WeightedAverage, InteractionFilter::AttackRelease, InteractionFilter::Damper, InteractionFilter::Physics,
     InteractionFilter::Curve, InteractionFilter::Math, InteractionFilter::Clamp, InteractionFilter::Steps, InteractionFilter::Remap, InteractionFilter::Threshold,
     InteractionFilter::Delay, InteractionFilter::Hold, InteractionFilter::Debounce, InteractionFilter::AutoReturn, InteractionFilter::Speed,
     InteractionFilter::Toggle, InteractionFilter::PulseDetection, InteractionFilter::Envelope,

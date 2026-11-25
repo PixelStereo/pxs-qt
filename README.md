@@ -36,6 +36,7 @@ That is all it takes for any OSCQuery client to find the app, read its tree, lis
 | `pxs::midi` | MIDI messages as events (parse, build, **learn**), the ports, the inputs to listen to; bring your own RtMidi (`PXS_RTMIDI_TARGET`) or use the system one |
 | `pxs::dmx` | Art-Net and sACN frames, encoded and decoded, strictly checked; Qt Core only |
 | `pxs::dmxout` | the **DMX outputs** of an application, the same everywhere: an `Output` (Art-Net or sACN, unicast or the protocol's group, network card, port, rate, sACN priority and source name, full or partial frames, a map from your universes to the network's; validated, saved as JSON), `route()` to apply it, and a `Sender` that streams the universes on a thread of its own with a sequence per universe, per-channel sACN priorities and clean end of stream |
+| `pxs::devices` | the **devices an application drives**, the same everywhere (pxs-core's device model with its transport): OSCQuery devices found on the network or added by address, plain OSC receivers (with declared addresses, or open to any path), **DMX fixtures** on 8 or 16 bits (coarse then fine) in your universes, ready for `pxs::dmxout`, and **MIDI** instruments (CC, notes, pitch bend, program change); ids kept across launches, saved as JSON where you like |
 | `pxs::dmxnet` | a **Monitor** (what every source sends, the HTP / LTP / sACN priority merge) and a **Transmitter** that recognises its own frames |
 | `pxs::bind` | expose an interface's own widgets as parameters and actions |
 | `pxs::controls` | a web page of controls (free grid, pages, edit mode, SVG widgets) and the server behind it |
@@ -47,6 +48,7 @@ That is all it takes for any OSCQuery client to find the app, read its tree, lis
 | `pxs::timelineview` | the editor of a timeline (from NyxMap): transport, ruler and zoom, a row per track (keys or a wave, colours, events, points, filters), on what the application says through a `TimelineHost` |
 | `pxs::theme` | colour tokens, the `graphite` and `nyxmap` dark palettes, the shared style sheet |
 | `pxs::dmxoutview` | the **DMX outputs panel**: add, switch on and edit a list of outputs (protocol, unicast or group, network card, addresses, port, rate, sACN priority and name, full or partial frames, an optional universe map), with what each one is doing; the same in every application that sends DMX |
+| `pxs::devicesview` | the **Devices panel**: the list of devices and the editor of the selected one (where it is, and its addresses as its kind takes them), as a window or in a page |
 | `pxs::filterview` | the **filter chain of a signal**: a card per filter to fold, rename, set and drag to another place (its curve drawn for a Curve, its ADSR in the hand for an Envelope), one bar for the signal coming in and one for the signal going out, whose range follows the chain (a Remap's Out, a Clamp's ends); hooks for presets and undo |
 | `pxs::curveview` | **curves on screen**: the keys of an animation track (click, drag, draw over, easings, Bézier handles, hold) and the ADSR envelope to take in the hand |
 | `pxs::widgets` | number fields (drag, type, snap) and the colour picker |

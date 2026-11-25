@@ -11,6 +11,21 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 find_package(Qt6 6.4 REQUIRED COMPONENTS Core Widgets Network)
 find_package(Threads REQUIRED)
 find_package(Qt6 6.4 QUIET COMPONENTS WebSockets)
+# Devices: what an application drives (OSCQuery found or added, plain OSC, DMX fixtures on 8 or 16 bits, MIDI instruments), the same in
+# every application: pxs-core's device model with its transport (OSCQuery clients and discovery, UDP, the universes for the DMX outputs,
+# the MIDI ports). From OSCQlock's destinations. Qt Core and Network.
+add_library(pxs_devices STATIC src/devices/Devices.cpp src/devices/pxs/Devices.h)
+add_library(pxs::devices ALIAS pxs_devices)
+set_target_properties(pxs_devices PROPERTIES AUTOMOC ON POSITION_INDEPENDENT_CODE ON)
+target_include_directories(pxs_devices PUBLIC src/devices)
+target_link_libraries(pxs_devices PUBLIC pxs-core::device pxs::params Qt6::Core Qt6::Network PRIVATE pxs::oscclient pxs::midi pxs-core::osc pxs-core::dmx)
+
+# The devices on screen: the list and the editor of a device, the same in every application. Qt Widgets.
+add_library(pxs_devicesview STATIC src/devices/DevicesPanel.cpp src/devices/pxs/DevicesPanel.h)
+add_library(pxs::devicesview ALIAS pxs_devicesview)
+set_target_properties(pxs_devicesview PROPERTIES AUTOMOC ON POSITION_INDEPENDENT_CODE ON)
+target_link_libraries(pxs_devicesview PUBLIC pxs::devices Qt6::Widgets PRIVATE pxs::midi)
+
 if(PXS_BUILD_TESTS)
     find_package(Qt6 6.4 REQUIRED COMPONENTS Test)
 endif()
@@ -242,6 +257,10 @@ if(PXS_BUILD_TESTS)
     add_executable(pxs_midi_test test/midi_test.cpp)
     target_link_libraries(pxs_midi_test PRIVATE pxs::midi)
     add_test(NAME midi COMMAND pxs_midi_test)
+    add_executable(pxs_devices_test test/devices_test.cpp)
+    target_link_libraries(pxs_devices_test PRIVATE pxs::devicesview pxs::oscclient pxs::osc)
+    add_test(NAME devices COMMAND pxs_devices_test)
+    set_tests_properties(devices PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_executable(pxs_oscclient_test test/oscclient_test.cpp)
     target_link_libraries(pxs_oscclient_test PRIVATE pxs::oscclient pxs::tree)
     add_test(NAME oscclient COMMAND pxs_oscclient_test)
