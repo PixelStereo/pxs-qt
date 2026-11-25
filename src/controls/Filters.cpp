@@ -15,31 +15,18 @@ std::vector<InteractionStage> stagesOf(const QJsonArray &filters)
     return out;
 }
 
-// Group, and what it does, of each filter
-struct Info {
-    InteractionFilter kind;
-    const char *group, *about;
+// The filters as the editor lists them, by group (their group and what they do are pxs-core's)
+const InteractionFilter kOrder[] = {
+    InteractionFilter::Average, InteractionFilter::WeightedAverage, InteractionFilter::AttackRelease, InteractionFilter::Damper,
+    InteractionFilter::Curve, InteractionFilter::Math, InteractionFilter::Clamp, InteractionFilter::Steps, InteractionFilter::Remap, InteractionFilter::Threshold,
+    InteractionFilter::Delay, InteractionFilter::Hold, InteractionFilter::Debounce, InteractionFilter::AutoReturn, InteractionFilter::Speed,
+    InteractionFilter::Toggle, InteractionFilter::PulseDetection, InteractionFilter::Envelope,
 };
-const Info kInfo[] = {
-    {InteractionFilter::Average, "Smoothing", "The mean of what was set over a window of time: a steadier value."},
-    {InteractionFilter::WeightedAverage, "Smoothing", "Follows what is set with a soft lag: the smoothing is the time to get there."},
-    {InteractionFilter::AttackRelease, "Smoothing", "Rises in the attack time and falls in the release time."},
-    {InteractionFilter::Damper, "Smoothing", "A spring: follows with a little life; damping 1 does not overshoot."},
-    {InteractionFilter::Curve, "Shape", "Reshapes the value with a curve (the presets are the usual ones)."},
-    {InteractionFilter::Math, "Shape", "An operation on the value: add, multiply, power, round, invert…"},
-    {InteractionFilter::Clamp, "Shape", "Keeps the value between two limits (0 to 1 of the tile's range)."},
-    {InteractionFilter::Steps, "Shape", "Rounds the value to a number of steps."},
-    {InteractionFilter::Remap, "Shape", "Takes a part of the range (In) and spreads it over another (Out)."},
-    {InteractionFilter::Threshold, "Shape", "On above the threshold, off below, with a margin so that it does not flicker."},
-    {InteractionFilter::Delay, "Timing", "What is set arrives later."},
-    {InteractionFilter::Hold, "Timing", "A fall is held for a time before it follows."},
-    {InteractionFilter::Debounce, "Timing", "Follows once the value has stopped changing for a time: a flicker is ignored."},
-    {InteractionFilter::AutoReturn, "Timing", "Leaves its rest value for a time, then goes back to it."},
-    {InteractionFilter::Speed, "Timing", "The speed of the value (how fast it moves) instead of the value."},
-    {InteractionFilter::Toggle, "Trigger", "Each time the value goes over the threshold, it flips between on and off."},
-    {InteractionFilter::PulseDetection, "Trigger", "A sudden rise gives a pulse that fades."},
-    {InteractionFilter::Envelope, "Trigger", "A trigger gives an ADSR: attack, decay, sustain, release."},
-};
+QString aboutOf(InteractionFilter kind)
+{
+    const QString about = QString::fromUtf8(pxs::core::filter::about(kind));
+    return kind == InteractionFilter::Clamp ? about.chopped(1) + QStringLiteral(" (0 to 1 of the tile's range).") : about; // on a tile
+}
 } // namespace
 
 QJsonArray cleanFilters(const QJsonArray &filters)
@@ -67,14 +54,14 @@ bool anyFilterOn(const QJsonArray &filters)
 QJsonObject filterCatalog()
 {
     QJsonArray list;
-    for (const Info &i : kInfo) {
+    for (const InteractionFilter kind : kOrder) {
         QJsonArray settings;
         for (int w = 0; w < kFilterSettingCount; ++w) {
-            const FilterSetting f = interactionFilterSetting(i.kind, w);
+            const FilterSetting f = interactionFilterSetting(kind, w);
             if (f.name.isEmpty()) continue;
             settings.append(QJsonObject{{"id", QString(QChar('a' + w))}, {"name", f.name}, {"suffix", f.suffix.trimmed()}, {"min", f.min}, {"max", f.max}, {"def", f.def}});
         }
-        list.append(QJsonObject{{"key", interactionFilterKey(i.kind)}, {"name", interactionFilterName(i.kind)}, {"group", QString::fromLatin1(i.group)}, {"about", QString::fromLatin1(i.about)}, {"settings", settings}});
+        list.append(QJsonObject{{"key", interactionFilterKey(kind)}, {"name", interactionFilterName(kind)}, {"group", QString::fromUtf8(pxs::core::filter::group(kind))}, {"about", aboutOf(kind)}, {"settings", settings}});
     }
     QJsonArray ops;
     for (int k = 0; k < kMathOpCount; ++k) {

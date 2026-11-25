@@ -39,6 +39,8 @@
 
 #include "Anim.h"
 
+#include <pxs/core/filter/filter.h>
+
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QString>
@@ -49,20 +51,13 @@
 
 enum class InteractionSource { Keyboard = 0, Midi, Osc, Internal, Audio };
 inline constexpr int kInteractionSourceCount = 5;
-enum class InteractionFilter {
-    Average = 0, WeightedAverage, PulseDetection, AttackRelease, Damper, // over time (as before: saved by these keys)
-    Curve, Math, Clamp, Steps, Threshold, Delay, Speed, Remap, Toggle,
-    Envelope, // a trigger in, an ADSR out: Attack, Decay, Sustain, Release (the impact of a hit, a flash, a pulse)
-    // Over time, for switches and counts as for numbers
-    Hold,      // a fall is held for a time before it follows (a switch stays on a moment after it went off)
-    Debounce,  // a change is followed once the value has not changed for a time (a flicker is ignored)
-    AutoReturn // leaves its rest value for a time, then goes back to it until the value is at rest again
-};
-inline constexpr int kInteractionFilterCount = 18;
-inline constexpr int kFilterSettingCount = 4; // a, b, c, d (Remap: In Min, In Max, Out Min, Out Max)
+// The filters and their operations are pxs-core's (pxs/core/filter/filter.h): the chain is run there; this is their Qt face
+using InteractionFilter = pxs::core::filter::Kind;
+inline constexpr int kInteractionFilterCount = pxs::core::filter::kKindCount;
+inline constexpr int kFilterSettingCount = pxs::core::filter::kSettingCount; // a, b, c, d (Remap: In Min, In Max, Out Min, Out Max)
 // A Math filter's operation on the value x, with its value a
-enum class MathOp { Add = 0, Subtract, Multiply, Divide, Modulo, Power, Min, Max, Abs, Floor, Ceil, Round, OneMinus };
-inline constexpr int kMathOpCount = 13;
+using MathOp = pxs::core::filter::MathOp;
+inline constexpr int kMathOpCount = pxs::core::filter::kMathOpCount;
 QString mathOpName(MathOp op); // "x + a", "x − a"…
 bool mathOpUsesValue(MathOp op);
 double applyMathOp(MathOp op, double x, double a);
@@ -257,10 +252,10 @@ public:
     // One frame of `dt` seconds: the filters move on. The result after the filters and the master, for the target as it
     // is (none: nothing came in yet)
     std::optional<double> step(const Interaction &it, double dt);
-    std::optional<double> level() const { return m_level; } // the source's last value (shown)
-    std::optional<double> output() const { return m_out; }  // the last result of step
-    std::optional<double> curveInput() const { return m_curveIn; } // what entered the first curve on
-    const std::vector<double> &stageOutputs() const { return m_stageOut; } // the value after each filter (shown)
+    std::optional<double> level() const { return m_chain.level(); } // the source's last value (shown)
+    std::optional<double> output() const { return m_out; }          // the last result of step
+    std::optional<double> curveInput() const { return m_chain.curveInput(); } // what entered the first curve on
+    const std::vector<double> &stageOutputs() const { return m_chain.stageOutputs(); } // the value after each filter (shown)
     void reset() { *this = InteractionProcessor(); }
     // The value of a Hit source: the pulse of this interaction's own detector, from the flux of its audio input
     double hit(const OnsetFlux &flux, const Interaction &it, double dt)
@@ -269,22 +264,10 @@ public:
     }
 
 private:
-    // Each filter's state, made again when it is another kind of filter
-    struct StageState {
-        InteractionFilter kind = InteractionFilter::Average;
-        bool started = false, high = false;
-        double y = 0, v = 0, slow = 0, prev = 0;     // its value, its speed (Damper), its slow average (Pulse), the last input
-        int phase = 0;                                // Envelope: 0 idle, 1 attack, 2 decay, 3 sustain, 4 release
-        double peak = 1;                              // Envelope: the level the trigger came in at (its velocity)
-        std::deque<std::pair<double, double>> window{}; // Average, Delay: (time, value)
-    };
-    OnsetDetector m_hit;             // a Hit source: what it learned of the sound
-    std::optional<double> m_level;   // the source's last value
-    bool m_fresh = false;            // a value came in since the last step
-    double m_time = 0;
-    std::vector<StageState> m_stages;
-    std::vector<double> m_stageOut;
-    std::optional<double> m_out, m_curveIn;
+    OnsetDetector m_hit; // a Hit source: what it learned of the sound
+    pxs::core::filter::Chain m_chain;           // the filters, as pxs-core runs them
+    std::vector<pxs::core::filter::StageView> m_views; // the interaction's stages, handed over each frame
+    std::optional<double> m_out;                // after the master
 };
 
 // A color target's pick-up: every channel has to meet the target's before the interaction takes it over
