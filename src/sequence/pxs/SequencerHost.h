@@ -36,8 +36,10 @@ public:
     // The show's musical clock: steps counted in beats and quantized
     virtual const BeatClock &beatClock() const = 0;
 
-    // How the application runs: the frames on a thread of their own (else the waits move with advance()), the fades moved only by
-    // hand (tests)
+    // How the application runs: the frames on a thread of their own (else the waits move with advance()); `fadesManual`: the waits
+    // move only when the application calls advance(), on its own thread, so that every call to the host comes from there (tests; an
+    // application with a clock of its own and nothing thread-safe, as OSCQlock). Else a cue clock of its own calls the host from its
+    // thread, under the shared lock
     virtual bool isThreaded() const { return false; }
     virtual bool fadesManual() const { return false; }
     // The pace of the show's time (1: real time; 0: paused): the waits move at it. Read from the cue clock's thread
