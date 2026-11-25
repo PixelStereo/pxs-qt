@@ -82,7 +82,7 @@ add_library(pxs_interaction STATIC src/interaction/Interactions.cpp src/interact
     src/interaction/InteractionGraph.h src/interaction/Anim.h src/interaction/OnsetAnalysis.h src/interaction/Published.h)
 add_library(pxs::interaction ALIAS pxs_interaction)
 target_include_directories(pxs_interaction PUBLIC src/interaction)
-target_link_libraries(pxs_interaction PUBLIC Qt6::Core)
+target_link_libraries(pxs_interaction PUBLIC Qt6::Core pxs-core::timeline)
 
 # Expose an interface's own widgets (check box, number field, menu, text field, button) as parameters and messages
 add_library(pxs_bind STATIC src/bind/Bind.cpp src/bind/pxs/Bind.h)
@@ -244,6 +244,9 @@ if(PXS_BUILD_TESTS)
     add_executable(pxs_interaction_graph_test test/interaction_graph_test.cpp)
     target_link_libraries(pxs_interaction_graph_test PRIVATE pxs::interaction)
     add_test(NAME interaction_graph COMMAND pxs_interaction_graph_test)
+    add_executable(pxs_anim_test test/anim_test.cpp)
+    target_link_libraries(pxs_anim_test PRIVATE pxs::interaction)
+    add_test(NAME anim COMMAND pxs_anim_test)
     add_executable(pxs_interaction_test test/interaction_test.cpp)
     target_link_libraries(pxs_interaction_test PRIVATE pxs::interaction)
     add_test(NAME interaction COMMAND pxs_interaction_test)
