@@ -26,7 +26,6 @@ class QUndoStack;
 class QVBoxLayout;
 class NumberBox;
 class IntBox;
-class AnimEditor;
 
 class QMenu;
 class QCheckBox;
