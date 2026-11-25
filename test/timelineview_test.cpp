@@ -7,6 +7,8 @@
 
 #include <cstdio>
 
+using namespace pxs::timelineview;
+
 static int failures = 0;
 #define CHECK(condition) do { if (!(condition)) { std::fprintf(stderr, "FAILED %s:%d %s\n", __FILE__, __LINE__, #condition); ++failures; } } while (0)
 

@@ -33,6 +33,8 @@
 #include <algorithm>
 #include <cmath>
 
+namespace pxs::timelineview {
+
 namespace {
 
 // A setting's name that puts its default back when it is clicked (underlined, in the accent, under the pointer)
@@ -2058,3 +2060,5 @@ void AnimEditor::resetView()
     }
     applyView();
 }
+
+} // namespace pxs::timelineview

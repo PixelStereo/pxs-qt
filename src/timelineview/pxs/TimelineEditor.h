@@ -29,6 +29,14 @@ class IntBox;
 class AnimEditor;
 
 class QMenu;
+class QCheckBox;
+class QSlider;
+class QTimer;
+
+namespace pxs::timelineview {
+
+class AnimEditor;
+
 
 // A sampled projection of both axis curves over the current pass. Seeking here
 // uses the same transport as the time ruler; it never changes the keys.
@@ -328,3 +336,5 @@ private:
 
 // Is `a` the same animation as `b`, as edited (its transport where it is left out)?
 bool sameAnimation(const Animation &a, const Animation &b);
+
+} // namespace pxs::timelineview
