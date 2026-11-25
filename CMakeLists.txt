@@ -78,11 +78,11 @@ target_link_libraries(pxs_widgets PUBLIC Qt6::Widgets)
 # Interactions: a value driven from outside (a key, a MIDI controller, an OSC message, a signal) through a chain of
 # filters (remap, average, attack-release, curve, threshold, toggle, envelope…), with pick-up and an Action mode; the
 # graph of them. From NyxMap, where it is the Interaction panel's model. Qt Core only.
-add_library(pxs_interaction STATIC src/interaction/Interactions.cpp src/interaction/Anim.cpp src/interaction/Interactions.h
+add_library(pxs_interaction STATIC src/interaction/Interactions.cpp src/interaction/Anim.cpp src/interaction/TimelineHost.cpp src/interaction/pxs/TimelineHost.h src/interaction/Interactions.h
     src/interaction/InteractionGraph.h src/interaction/Anim.h src/interaction/OnsetAnalysis.h src/interaction/Published.h)
 add_library(pxs::interaction ALIAS pxs_interaction)
 target_include_directories(pxs_interaction PUBLIC src/interaction)
-target_link_libraries(pxs_interaction PUBLIC Qt6::Core pxs-core::timeline)
+target_link_libraries(pxs_interaction PUBLIC Qt6::Core pxs-core::timeline pxs::params)
 
 # Expose an interface's own widgets (check box, number field, menu, text field, button) as parameters and messages
 add_library(pxs_bind STATIC src/bind/Bind.cpp src/bind/pxs/Bind.h)
@@ -141,8 +141,7 @@ target_link_libraries(pxs_filterview PUBLIC pxs::interaction pxs::widgets pxs::c
 
 # The editor of a timeline (from NyxMap): its transport, its ruler and zoom, and a row per track (keys or a wave, colours, events, points,
 # filters), on what an application tells it through a TimelineHost. Qt Widgets.
-add_library(pxs_timelineview STATIC src/timelineview/TimelineEditor.cpp src/timelineview/TimelineHost.cpp
-    src/timelineview/pxs/TimelineEditor.h src/timelineview/pxs/TimelineHost.h)
+add_library(pxs_timelineview STATIC src/timelineview/TimelineEditor.cpp src/timelineview/pxs/TimelineEditor.h)
 add_library(pxs::timelineview ALIAS pxs_timelineview)
 set_target_properties(pxs_timelineview PROPERTIES AUTOMOC ON POSITION_INDEPENDENT_CODE ON)
 target_include_directories(pxs_timelineview PUBLIC src/timelineview)
