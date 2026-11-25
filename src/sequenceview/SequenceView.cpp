@@ -55,23 +55,6 @@ Phases phasesOf(const Sequencer::Run &r)
     return ph;
 }
 
-// A sequence as it was edited
-class SetSequence : public QUndoCommand
-{
-public:
-    SetSequence(Sequencer &seq, int index, const Sequencer::Sequence &before, const Sequencer::Sequence &after, const QString &text)
-        : QUndoCommand(text), m_seq(seq), m_index(index), m_before(before), m_after(after)
-    {
-    }
-    void redo() override { m_seq.setSequence(m_index, m_after); }
-    void undo() override { m_seq.setSequence(m_index, m_before); }
-
-private:
-    Sequencer &m_seq;
-    int m_index;
-    Sequencer::Sequence m_before, m_after;
-};
-
 // The times as numbers to edit, and as bars that fill while a step is on its way; Then as a badge, GO or AUTO
 class StepDelegate : public QStyledItemDelegate
 {
@@ -426,6 +409,13 @@ void SequenceView::apply(const Sequencer::Sequence &after, const QString &text)
     if (m_undo) m_undo->push(new SetSequence(m_seq, index, before, after, text));
     else m_seq.setSequence(index, after);
 }
+
+SetSequence::SetSequence(Sequencer &seq, int index, const Sequencer::Sequence &before, const Sequencer::Sequence &after, const QString &text)
+    : QUndoCommand(text), m_seq(seq), m_index(index), m_before(before), m_after(after)
+{
+}
+void SetSequence::redo() { m_seq.setSequence(m_index, m_after); }
+void SetSequence::undo() { m_seq.setSequence(m_index, m_before); }
 
 void SequenceView::move(int by)
 {

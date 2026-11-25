@@ -7,6 +7,7 @@
 // application's stack. A step made of several actions (a group) is shown, not edited here.
 #include <pxs/Sequencer.h>
 
+#include <QUndoCommand>
 #include <QWidget>
 
 #include <utility>
@@ -30,6 +31,20 @@ public:
     virtual quint64 currentTimeline() const { return 0; }
     // Stop all: every wait and follow, and what the application stops with them (its timelines)
     virtual void stopAll(Sequencer &sequencer) { sequencer.stopAll(); }
+};
+
+// A sequence as it was edited: an undo step (the view pushes them; an application may too)
+class SetSequence : public QUndoCommand
+{
+public:
+    SetSequence(Sequencer &seq, int index, const Sequencer::Sequence &before, const Sequencer::Sequence &after, const QString &text);
+    void redo() override;
+    void undo() override;
+
+private:
+    Sequencer &m_seq;
+    int m_index;
+    Sequencer::Sequence m_before, m_after;
 };
 
 class SequenceView : public QWidget
