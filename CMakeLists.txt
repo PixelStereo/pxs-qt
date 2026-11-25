@@ -84,6 +84,25 @@ add_library(pxs::interaction ALIAS pxs_interaction)
 target_include_directories(pxs_interaction PUBLIC src/interaction)
 target_link_libraries(pxs_interaction PUBLIC Qt6::Core pxs-core::timeline pxs-core::filter pxs::params)
 
+# Sequences, the cue lists of a show (from NyxMap): ordered steps that recall a snapshot or a preset or drive a timeline, played by GO,
+# with their waits, follows, groups, tracking and clocks. The application answers what a step needs (SequencerHost.h); the musical
+# clock (BeatClock.h) and the timings are here too
+add_library(pxs_sequence STATIC src/sequence/Sequencer.cpp src/sequence/BeatClock.cpp src/sequence/TimingHistogram.cpp
+    src/sequence/pxs/Sequencer.h src/sequence/pxs/SequencerHost.h src/sequence/pxs/BeatClock.h src/sequence/pxs/AnnotatedMutex.h
+    src/sequence/pxs/TimingHistogram.h)
+add_library(pxs::sequence ALIAS pxs_sequence)
+set_target_properties(pxs_sequence PROPERTIES AUTOMOC ON POSITION_INDEPENDENT_CODE ON)
+target_include_directories(pxs_sequence PUBLIC src/sequence)
+target_link_libraries(pxs_sequence PUBLIC pxs::interaction pxs::params Qt6::Core)
+
+# A sequence as a cue list on screen, for an application whose steps drive timelines (OSCQlock): GO, the step on standby, the times
+# of the steps on their way in NyxMap's colours, undo steps. Qt Widgets
+add_library(pxs_sequenceview STATIC src/sequenceview/SequenceView.cpp src/sequenceview/pxs/SequenceView.h)
+add_library(pxs::sequenceview ALIAS pxs_sequenceview)
+set_target_properties(pxs_sequenceview PROPERTIES AUTOMOC ON POSITION_INDEPENDENT_CODE ON)
+target_include_directories(pxs_sequenceview PUBLIC src/sequenceview)
+target_link_libraries(pxs_sequenceview PUBLIC pxs::sequence Qt6::Widgets)
+
 # Expose an interface's own widgets (check box, number field, menu, text field, button) as parameters and messages
 add_library(pxs_bind STATIC src/bind/Bind.cpp src/bind/pxs/Bind.h)
 add_library(pxs::bind ALIAS pxs_bind)
@@ -259,6 +278,13 @@ if(PXS_BUILD_TESTS)
     add_executable(pxs_anim_test test/anim_test.cpp)
     target_link_libraries(pxs_anim_test PRIVATE pxs::interaction)
     add_test(NAME anim COMMAND pxs_anim_test)
+    add_executable(pxs_sequence_test test/sequence_test.cpp)
+    target_link_libraries(pxs_sequence_test PRIVATE pxs::sequence)
+    add_test(NAME sequence COMMAND pxs_sequence_test)
+    add_executable(pxs_sequenceview_test test/sequenceview_test.cpp)
+    target_link_libraries(pxs_sequenceview_test PRIVATE pxs::sequenceview)
+    add_test(NAME sequenceview COMMAND pxs_sequenceview_test)
+    set_tests_properties(sequenceview PROPERTIES ENVIRONMENT QT_QPA_PLATFORM=offscreen)
     add_executable(pxs_interaction_test test/interaction_test.cpp)
     target_link_libraries(pxs_interaction_test PRIVATE pxs::interaction)
     add_test(NAME interaction COMMAND pxs_interaction_test)
