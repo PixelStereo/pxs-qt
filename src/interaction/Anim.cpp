@@ -1,134 +1,202 @@
-// AnimTrack evaluation (keys, curves, oscillators), from NyxMap's timelines: what an interaction's Curve filter reads.
+// The timelines' logic is pxs-core's (pxs/core/timeline/timeline.h); Anim.h is its Qt face. Here: how a timeline is saved (the keys of
+// NyxMap's projects, which read back the same).
 #include "Anim.h"
 
-#include <cmath>
-#include <limits>
+#include <QJsonObject>
 
-static constexpr double kPi = 3.14159265358979323846;
-
-// The easing of normalized time 0..1: 0 linear, 1 ease in, 2 ease out, 3 ease in-out (smoothstep), 4 ease in cubic, 5 ease out cubic
-double easeCurve(double t, int curve)
+void sortAnimKeys(AnimTrack &t)
 {
-    if (t <= 0) return 0;
-    if (t >= 1) return 1;
-    switch (curve < 0 ? 0 : curve > 5 ? 5 : curve) {
-    case 0: return t;
-    case 1: return t * t;
-    case 2: return t * (2 - t);
-    case 3: return t * t * (3 - 2 * t);
-    case 4: return t * t * t;
-    default: return 1 - (1 - t) * (1 - t) * (1 - t);
+    std::stable_sort(t.keys.begin(), t.keys.end(), [](const AnimKey &a, const AnimKey &b) { return a.t < b.t; });
+    if (t.isPoint()) for (int c = 0; c < 2; ++c) {
+        auto &axis = t.axes[size_t(c)];
+        axis.axes.clear();
+        axis.color = false;
+        axis.layer = t.layer;
+        axis.param = t.param + (c ? "/y" : "/x");
+        sortAnimKeys(axis);
     }
 }
 
 // ---------------------------------------------------------------------------
-// Values
+// Saved
 
-// A random number in -1..1 for (seed, n): the same every time
-static double hashUnit(quint32 seed, long long n)
+static const char *const kWaveKeys[] = {"sine", "triangle", "saw", "square", "random", "smooth_random"};
+static const char *const kLoopKeys[] = {"once", "loop", "pingpong"};
+
+static int keyIndex(const char *const *keys, int n, const QString &k, int fallback)
 {
-    quint64 x = (quint64(seed) << 32) ^ quint64(n) ^ 0x9E3779B97F4A7C15ull;
-    x ^= x >> 33;
-    x *= 0xff51afd7ed558ccdull;
-    x ^= x >> 33;
-    x *= 0xc4ceb9fe1a85ec53ull;
-    x ^= x >> 33;
-    return double(x >> 11) / double(1ull << 53) * 2.0 - 1.0;
+    for (int i = 0; i < n; ++i)
+        if (k == QLatin1String(keys[i])) return i;
+    return fallback;
 }
 
-// The value of a cubic Bézier (one coordinate) at s in 0..1
-static double cubic(double a, double b, double c, double d, double s)
+QStringList animWaveKeys()
 {
-    const double u = 1 - s;
-    return u * u * u * a + 3 * u * u * s * b + 3 * u * s * s * c + s * s * s * d;
+    QStringList k;
+    for (const char *x : kWaveKeys) k << QString::fromLatin1(x);
+    return k;
 }
 
-void AnimTrack::bezierHandles(size_t k, double *t1, double *v1, double *t2, double *v2) const
-{
-    const AnimKey &a = keys[k], &b = keys[k + 1];
-    const double va = keyValue(k), vb = keyValue(k + 1), span = std::max(0.0, b.t - a.t);
-    // Automatic: flat, a third of the way; a handle never reaches beyond the other key (the curve stays a function of time)
-    *t1 = a.t + (a.hasOut() ? std::clamp(a.outDt, 0.0, span) : span / 3);
-    *v1 = va + (a.hasOut() ? a.outDv : 0.0);
-    *t2 = b.t + (b.hasIn() ? std::clamp(b.inDt, -span, 0.0) : -span / 3);
-    *v2 = vb + (b.hasIn() ? b.inDv : 0.0);
-}
+QString animLoopKey(AnimLoop l) { return QString::fromLatin1(kLoopKeys[std::clamp(int(l), 0, 2)]); }
+AnimLoop animLoopFromKey(const QString &k) { return AnimLoop(keyIndex(kLoopKeys, 3, k, 1)); }
 
-double AnimTrack::valueAt(double position, double played) const
+// What drives a number (a timeline's track, or a layer's animation), into a JSON object: its keys
+// [t, v, curve, "current", {"in": [dt, dv], "out": [dt, dv]}] (all but t and v when they matter) and its oscillator
+void animTrackToJson(const AnimTrack &t, QJsonObject &o)
 {
-    if (oscillator) {
-        const double per = std::max(0.01, period);
-        const double total = played / per + phase; // periods since the start
-        double p = total - std::floor(total);      // 0..1 within the period
-        double w = 0;
-        switch (wave) {
-        case AnimWave::Sine: w = std::sin(2 * kPi * p); break;
-        case AnimWave::Triangle: w = p < 0.25 ? 4 * p : p < 0.75 ? 2 - 4 * p : 4 * p - 4; break; // starts at 0, rises
-        case AnimWave::Saw: w = 2 * p - 1; break;
-        case AnimWave::Square: w = p < 0.5 ? 1 : -1; break;
-        case AnimWave::Random: w = hashUnit(seed, (long long)std::floor(total)); break;
-        case AnimWave::SmoothRandom: {
-            const long long n = (long long)std::floor(total);
-            const double e = (1 - std::cos(kPi * p)) / 2; // eased from one value to the next
-            w = hashUnit(seed, n) + (hashUnit(seed, n + 1) - hashUnit(seed, n)) * e;
-            break;
+    if (!t.dataFilters.isEmpty()) o["data_filters"] = t.dataFilters;
+    if (t.isPoint()) {
+        o["type"] = QStringLiteral("point2d");
+        if (!t.enabled) o["enable"] = false;
+        QJsonArray axes;
+        for (const auto &axis : t.axes) {
+            QJsonObject value;
+            animTrackToJson(axis, value);
+            axes.append(value);
         }
-        }
-        return center + amplitude * w;
+        o["axes"] = axes;
+        return;
     }
-    if (keys.empty()) return std::numeric_limits<double>::quiet_NaN();
-    if (position <= keys.front().t) return keyValue(0);
-    if (position >= keys.back().t) return keyValue(keys.size() - 1);
-    for (size_t k = 0; k + 1 < keys.size(); ++k) {
-        const AnimKey &a = keys[k], &b = keys[k + 1];
-        if (position >= b.t) continue;
-        const double va = keyValue(k), vb = keyValue(k + 1);
-        if (a.curve == kAnimHold || b.t - a.t <= 1e-9) return va;
-        if (a.curve == kAnimBezier) {
-            double t1, v1, t2, v2;
-            bezierHandles(k, &t1, &v1, &t2, &v2);
-            // The curve's time grows with s (the handles stay within the segment): s found by halving
-            double lo = 0, hi = 1;
-            for (int i = 0; i < 40; ++i) {
-                const double mid = (lo + hi) / 2;
-                (cubic(a.t, t1, t2, b.t, mid) < position ? lo : hi) = mid;
+    if (t.event) {
+        o["type"] = QStringLiteral("event");
+        if (!t.enabled) o["enable"] = false;
+        QJsonArray times, values;
+        bool valued = false;
+        for (const AnimKey &k : t.keys) {
+            times.append(k.t);
+            values.append(k.v);
+            valued = valued || k.v != 0;
+        }
+        o["keys"] = times;
+        if (valued) o["values"] = values; // what each flag sets (a switch, a choice, a number); none: an action
+        return;
+    }
+    if (t.color) o["type"] = QStringLiteral("color");
+    if (!t.enabled) o["enable"] = false;
+    if (t.oscillator) {
+        o["oscillator"] = QJsonObject{{"wave", QString::fromLatin1(kWaveKeys[std::clamp(int(t.wave), 0, kAnimWaveCount - 1)])},
+                                      {"period", t.period},
+                                      {"center", t.center},
+                                      {"amplitude", t.amplitude},
+                                      {"phase", t.phase},
+                                      {"seed", double(t.seed)}};
+    }
+    QJsonArray keys;
+    for (const AnimKey &k : t.keys) {
+        QJsonArray kv{k.t};
+        if (t.color) kv.append(QJsonArray{k.rgb[0], k.rgb[1], k.rgb[2]});
+        else kv.append(k.v);
+        QJsonObject handles;
+        if (k.hasIn()) handles["in"] = QJsonArray{k.inDt, k.inDv};
+        if (k.hasOut()) handles["out"] = QJsonArray{k.outDt, k.outDv};
+        const bool more = k.isCurrentValue || !handles.isEmpty();
+        if (k.curve == kAnimHold) kv.append(QStringLiteral("hold"));
+        else if (k.curve == kAnimBezier) kv.append(QStringLiteral("bezier"));
+        else if (k.curve != 3 || more) kv.append(k.curve);
+        if (k.isCurrentValue) kv.append(QStringLiteral("current"));
+        if (!handles.isEmpty()) kv.append(handles);
+        keys.append(kv);
+    }
+    if (!keys.isEmpty()) o["keys"] = keys; // an oscillator keeps the curve it had, should it go back to it
+}
+
+void animTrackFromJson(AnimTrack &t, const QJsonObject &o, double duration)
+{
+    t.dataFilters = o.value("data_filters").toArray();
+    t.axes.clear();
+    if (o.value("type").toString() == QLatin1String("point2d")) {
+        t.color = false;
+        t.enabled = o.value("enable").toBool(true);
+        const auto axes = o.value("axes").toArray();
+        if (axes.size() == 2) for (const auto &value : axes) {
+            auto child = value.toObject();
+            child.remove("type"); // children are scalar; do not parse recursive groups
+            child.remove("axes");
+            AnimTrack axis;
+            animTrackFromJson(axis, child, duration);
+            t.axes.push_back(axis);
+        }
+        sortAnimKeys(t);
+        return;
+    }
+    t.event = o.value("type").toString() == QLatin1String("event");
+    if (t.event) {
+        t.color = t.oscillator = false;
+        t.enabled = o.value("enable").toBool(true);
+        t.keys.clear();
+        const QJsonArray times = o.value("keys").toArray(), values = o.value("values").toArray();
+        for (int k = 0; k < times.size(); ++k)
+            if (times[k].isDouble()) {
+                const double v = values.at(k).toDouble();
+                t.keys.push_back(AnimKey{std::clamp(times[k].toDouble(), 0.0, duration), std::isfinite(v) ? v : 0.0, 0});
             }
-            return cubic(va, v1, v2, vb, (lo + hi) / 2);
+        sortAnimKeys(t);
+        return;
+    }
+    t.color = o.value("type").toString() == QLatin1String("color");
+    t.enabled = o.value("enable").toBool(true);
+    if (o.contains("oscillator")) {
+        const QJsonObject w = o.value("oscillator").toObject();
+        t.oscillator = true;
+        t.wave = AnimWave(keyIndex(kWaveKeys, kAnimWaveCount, w.value("wave").toString(), 0));
+        t.period = std::clamp(w.value("period").toDouble(1), 0.01, 36000.0);
+        t.center = w.value("center").toDouble(0.5);
+        t.amplitude = w.value("amplitude").toDouble(0.5);
+        t.phase = w.value("phase").toDouble(0);
+        t.seed = quint32(std::clamp(w.value("seed").toDouble(1), 0.0, 4294967295.0));
+    }
+    t.keys.clear();
+    for (const QJsonValue &kv : o.value("keys").toArray()) {
+        const QJsonArray k = kv.toArray();
+        if (k.size() < 2) continue;
+        if (t.color) {
+            const auto rgb = k[1].toArray();
+            if (rgb.size() != 3 || !rgb[0].isDouble() || !rgb[1].isDouble() || !rgb[2].isDouble()) continue;
+        } else if (!k[1].isDouble()) continue;
+        AnimKey key;
+        key.t = std::clamp(k[0].toDouble(), 0.0, duration);
+        key.v = k[1].toDouble();
+        if (t.color) {
+            const auto rgb = k[1].toArray();
+            for (int c = 0; c < 3; ++c) key.rgb[c] = std::clamp(rgb[c].toDouble(), 0.0, 1.0);
         }
-        return va + (vb - va) * easeCurve((position - a.t) / (b.t - a.t), a.curve);
+        key.curve = 3;
+        for (int i = 2; i < k.size(); ++i) {
+            const QJsonValue x = k[i];
+            if (x.isDouble()) key.curve = std::clamp(x.toInt(3), 0, 5);
+            else if (x.toString() == "hold") key.curve = kAnimHold;
+            else if (x.toString() == "bezier") key.curve = kAnimBezier;
+            else if (x.toString() == "current") key.isCurrentValue = t.keys.empty(); // the first key only
+            else if (x.isObject()) {
+                const QJsonArray in = x.toObject().value("in").toArray(), out = x.toObject().value("out").toArray();
+                if (in.size() == 2) key.inDt = std::min(0.0, in[0].toDouble()), key.inDv = in[1].toDouble();
+                if (out.size() == 2) key.outDt = std::max(0.0, out[0].toDouble()), key.outDv = out[1].toDouble();
+            }
+        }
+        t.keys.push_back(key);
     }
-    return keyValue(keys.size() - 1);
+    sortAnimKeys(t);
+    if (t.color) {
+        t.oscillator = false;
+        for (auto &key : t.keys) {
+            if (key.curve == kAnimBezier) key.curve = 3;
+        }
+    }
 }
 
-double AnimTrack::keyValue(size_t k) const
+// The transport settings shared by a timeline and a layer's animation
+void animTransportToJson(const Animation &a, QJsonObject &o)
 {
-    if (k == 0 && !keys.empty() && keys[0].isCurrentValue && std::isfinite(captured)) return captured;
-    return k < keys.size() ? keys[k].v : std::numeric_limits<double>::quiet_NaN();
+    o["duration"] = a.duration;
+    o["loop"] = animLoopKey(a.loop);
+    if (a.repeat > 0) o["repeat"] = a.repeat;
+    if (a.speed != 1.0) o["speed"] = a.speed;
 }
 
-std::array<double, 3> AnimTrack::keyColor(size_t k) const
+void animTransportFromJson(Animation &a, const QJsonObject &o)
 {
-    if (k == 0 && !keys.empty() && keys.front().isCurrentValue &&
-        std::all_of(capturedRgb.begin(), capturedRgb.end(), [](double v) { return std::isfinite(v); })) return capturedRgb;
-    return k < keys.size() ? keys[k].rgb : AnimTrack().capturedRgb;
-}
-
-std::array<double, 3> AnimTrack::colorAt(double position) const
-{
-    if (keys.empty()) {
-        const double nan = std::numeric_limits<double>::quiet_NaN();
-        return {nan, nan, nan};
-    }
-    if (position <= keys.front().t) return keyColor(0);
-    for (size_t k = 0; k + 1 < keys.size(); ++k) {
-        const AnimKey &a = keys[k], &b = keys[k + 1];
-        if (position >= b.t) continue;
-        const auto from = keyColor(k), to = keyColor(k + 1);
-        if (a.curve == kAnimHold || b.t - a.t <= 1e-9) return from;
-        const double u = easeCurve((position - a.t) / (b.t - a.t), a.curve);
-        std::array<double, 3> rgb;
-        for (int c = 0; c < 3; ++c) rgb[c] = from[c] + (to[c] - from[c]) * u;
-        return rgb;
-    }
-    return keyColor(keys.size() - 1);
+    a.duration = std::clamp(o.value("duration").toDouble(4), pxs::core::timeline::Transport::kMinDuration, 36000.0);
+    a.loop = animLoopFromKey(o.value("loop").toString());
+    a.repeat = std::clamp(o.value("repeat").toInt(0), 0, 100000);
+    a.speed = std::clamp(o.value("speed").toDouble(1.0), 0.0, 10.0);
 }

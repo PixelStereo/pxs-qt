@@ -44,6 +44,7 @@ That is all it takes for any OSCQuery client to find the app, read its tree, lis
 
 | Module | What it gives you |
 |---|---|
+| `pxs::timelineview` | the editor of a timeline (from NyxMap): transport, ruler and zoom, a row per track (keys or a wave, colours, events, points, filters), on what the application says through a `TimelineHost` |
 | `pxs::theme` | colour tokens, the `graphite` and `nyxmap` dark palettes, the shared style sheet |
 | `pxs::dmxoutview` | the **DMX outputs panel**: add, switch on and edit a list of outputs (protocol, unicast or group, network card, addresses, port, rate, sACN priority and name, full or partial frames, an optional universe map), with what each one is doing; the same in every application that sends DMX |
 | `pxs::filterview` | the **filter chain of a signal**: a card per filter to fold, rename, set and drag to another place (its curve drawn for a Curve, its ADSR in the hand for an Envelope), one bar for the signal coming in and one for the signal going out, whose range follows the chain (a Remap's Out, a Clamp's ends); hooks for presets and undo |

@@ -78,11 +78,11 @@ target_link_libraries(pxs_widgets PUBLIC Qt6::Widgets)
 # Interactions: a value driven from outside (a key, a MIDI controller, an OSC message, a signal) through a chain of
 # filters (remap, average, attack-release, curve, threshold, toggle, envelope…), with pick-up and an Action mode; the
 # graph of them. From NyxMap, where it is the Interaction panel's model. Qt Core only.
-add_library(pxs_interaction STATIC src/interaction/Interactions.cpp src/interaction/Anim.cpp src/interaction/Interactions.h
+add_library(pxs_interaction STATIC src/interaction/Interactions.cpp src/interaction/Anim.cpp src/interaction/TimelineHost.cpp src/interaction/pxs/TimelineHost.h src/interaction/Interactions.h
     src/interaction/InteractionGraph.h src/interaction/Anim.h src/interaction/OnsetAnalysis.h src/interaction/Published.h)
 add_library(pxs::interaction ALIAS pxs_interaction)
 target_include_directories(pxs_interaction PUBLIC src/interaction)
-target_link_libraries(pxs_interaction PUBLIC Qt6::Core)
+target_link_libraries(pxs_interaction PUBLIC Qt6::Core pxs-core::timeline pxs::params)
 
 # Expose an interface's own widgets (check box, number field, menu, text field, button) as parameters and messages
 add_library(pxs_bind STATIC src/bind/Bind.cpp src/bind/pxs/Bind.h)
@@ -138,6 +138,14 @@ add_library(pxs::filterview ALIAS pxs_filterview)
 set_target_properties(pxs_filterview PROPERTIES AUTOMOC ON POSITION_INDEPENDENT_CODE ON)
 target_include_directories(pxs_filterview PUBLIC src/filterview)
 target_link_libraries(pxs_filterview PUBLIC pxs::interaction pxs::widgets pxs::curveview Qt6::Widgets)
+
+# The editor of a timeline (from NyxMap): its transport, its ruler and zoom, and a row per track (keys or a wave, colours, events, points,
+# filters), on what an application tells it through a TimelineHost. Qt Widgets.
+add_library(pxs_timelineview STATIC src/timelineview/TimelineEditor.cpp src/timelineview/pxs/TimelineEditor.h)
+add_library(pxs::timelineview ALIAS pxs_timelineview)
+set_target_properties(pxs_timelineview PROPERTIES AUTOMOC ON POSITION_INDEPENDENT_CODE ON)
+target_include_directories(pxs_timelineview PUBLIC src/timelineview)
+target_link_libraries(pxs_timelineview PUBLIC pxs::interaction pxs::params pxs::curveview pxs::widgets Qt6::Widgets)
 
 # The panel that edits a list of DMX outputs, the same in every application that sends DMX. Qt Widgets.
 add_library(pxs_dmxoutview STATIC src/dmxoutview/OutputsPanel.cpp src/dmxoutview/pxs/OutputsPanel.h)
@@ -244,6 +252,13 @@ if(PXS_BUILD_TESTS)
     add_executable(pxs_interaction_graph_test test/interaction_graph_test.cpp)
     target_link_libraries(pxs_interaction_graph_test PRIVATE pxs::interaction)
     add_test(NAME interaction_graph COMMAND pxs_interaction_graph_test)
+    add_executable(pxs_timelineview_test test/timelineview_test.cpp)
+    target_link_libraries(pxs_timelineview_test PRIVATE pxs::timelineview)
+    add_test(NAME timelineview COMMAND pxs_timelineview_test)
+    set_tests_properties(timelineview PROPERTIES ENVIRONMENT QT_QPA_PLATFORM=offscreen)
+    add_executable(pxs_anim_test test/anim_test.cpp)
+    target_link_libraries(pxs_anim_test PRIVATE pxs::interaction)
+    add_test(NAME anim COMMAND pxs_anim_test)
     add_executable(pxs_interaction_test test/interaction_test.cpp)
     target_link_libraries(pxs_interaction_test PRIVATE pxs::interaction)
     add_test(NAME interaction COMMAND pxs_interaction_test)
