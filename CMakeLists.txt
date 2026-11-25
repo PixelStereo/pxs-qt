@@ -82,7 +82,7 @@ add_library(pxs_interaction STATIC src/interaction/Interactions.cpp src/interact
     src/interaction/InteractionGraph.h src/interaction/Anim.h src/interaction/OnsetAnalysis.h src/interaction/Published.h)
 add_library(pxs::interaction ALIAS pxs_interaction)
 target_include_directories(pxs_interaction PUBLIC src/interaction)
-target_link_libraries(pxs_interaction PUBLIC Qt6::Core pxs-core::timeline pxs::params)
+target_link_libraries(pxs_interaction PUBLIC Qt6::Core pxs-core::timeline pxs-core::filter pxs::params)
 
 # Expose an interface's own widgets (check box, number field, menu, text field, button) as parameters and messages
 add_library(pxs_bind STATIC src/bind/Bind.cpp src/bind/pxs/Bind.h)
