@@ -139,6 +139,17 @@ static void dmxDevices()
     CHECK(quint8(devices.dmxUniverses().at(2)[100]) == 0);
     devices.remove(id);
     CHECK(!devices.find(id));
+
+    // Renamed, then a new one under the old name: two devices
+    Device fixture;
+    fixture.kind = Kind::Dmx;
+    fixture.name = "Fixture";
+    const quint64 first = devices.add(fixture);
+    Device renamed = *devices.find(first);
+    renamed.name = "Wash";
+    CHECK(devices.set(renamed));
+    const quint64 second = devices.add(fixture);
+    CHECK(second != first && devices.find(first) && devices.find(first)->name == "Wash" && devices.nameOf(second) == QStringLiteral("Fixture"));
 }
 
 static void saved()
