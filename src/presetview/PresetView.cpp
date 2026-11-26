@@ -80,8 +80,11 @@ void addParameterEditors(QTreeWidget &tree, QTreeWidgetItem &item, const std::st
                          const pxs::core::tree::Preset &base, pxs::core::tree::Preset &edits,
                          double fadeOverride, bool step, const std::function<void()> &changed)
 {
-    const auto effective = base.resolved(step ? edits : pxs::core::tree::Preset{}, fadeOverride);
-    for (int column = 1; column <= 3; ++column) {
+    const bool group = !base.values.count(path);
+    auto sample = base;
+    if (group) sample.values[path] = "[]";
+    const auto effective = sample.resolved(step ? edits : pxs::core::tree::Preset{}, fadeOverride);
+    for (int column = group ? 2 : 1; column <= 3; ++column) {
         auto *edit = new QLineEdit;
         auto &numbers = column == 2 ? edits.times : edits.delays;
         const auto &effectiveNumbers = column == 2 ? effective.times : effective.delays;
@@ -97,7 +100,7 @@ void addParameterEditors(QTreeWidget &tree, QTreeWidgetItem &item, const std::st
             edit->setToolTip(QStringLiteral("Seconds. Clear to inherit; zero is explicit."));
         }
         tree.setItemWidget(&item, column, edit);
-        QObject::connect(edit, &QLineEdit::editingFinished, edit, [edit, path, column, step, &edits, &numbers, changed] {
+        QObject::connect(edit, &QLineEdit::editingFinished, edit, [edit, path, column, step, &edits, &numbers, &tree, changed] {
             const QString text = edit->text().trimmed();
             if (column == 1) {
                 if (text.isEmpty() && step) edits.values.erase(path);
@@ -105,6 +108,8 @@ void addParameterEditors(QTreeWidget &tree, QTreeWidgetItem &item, const std::st
                     const auto json = QJsonDocument::fromJson(text.toUtf8());
                     if (!json.isArray() || json.array().isEmpty()) return;
                     edits.values[path] = json.toJson(QJsonDocument::Compact).toStdString();
+                    if (auto *item = !step ? tree.itemAt(edit->mapTo(tree.viewport(), QPoint(1, 1))) : nullptr)
+                        item->setData(1, Qt::UserRole, QString::fromStdString(edits.values[path]));
                 }
             } else if (text.isEmpty()) numbers.erase(path);
             else {
@@ -161,7 +166,7 @@ PresetView::PresetView(pxs::core::tree::Tree &tree, QUndoStack *undo, PresetHost
     leftLayout->addLayout(leftToolbar);
 
     m_presetList = new PresetList;
-    m_presetList->setDragEnabled(true);
+    m_presetList->setDragDropMode(QAbstractItemView::DragOnly);
     m_presetList->setSelectionMode(QAbstractItemView::SingleSelection);
     leftLayout->addWidget(m_presetList, 1);
 
@@ -460,6 +465,7 @@ void PresetView::showPresetDetails(int index)
         if (!catItem) {
             catItem = new QTreeWidgetItem(m_paramsTree, {catName, QString()});
             catItem->setExpanded(true);
+            addParameterEditors(*m_paramsTree, *catItem, catName.toStdString(), p, p, -1, false, [this] { emit presetsChanged(); });
             QFont f = catItem->font(0);
             f.setBold(true);
             catItem->setFont(0, f);

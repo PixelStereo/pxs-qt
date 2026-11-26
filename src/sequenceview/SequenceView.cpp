@@ -514,8 +514,19 @@ QWidget *SequenceView::stepInspector(int row, QWidget *parent)
         };
         const auto populate = [step, preset, tree, update] {
             tree->clear();
+            std::map<std::string, QTreeWidgetItem *> groups;
             for (const auto &[path, value] : preset.values) {
-                auto *item = new QTreeWidgetItem(tree, {QString::fromStdString(path)});
+                const auto group = path.substr(0, path.find('/', 1));
+                QTreeWidgetItem *item;
+                if (group != path) {
+                    auto &parent = groups[group];
+                    if (!parent) {
+                        parent = new QTreeWidgetItem(tree, {QString::fromStdString(group)});
+                        parent->setExpanded(true);
+                        pxs::presetview::addParameterEditors(*tree, *parent, group, preset, step->presetOverrides, step->fadeOverride, true, update);
+                    }
+                    item = new QTreeWidgetItem(parent, {QString::fromStdString(path.substr(group.size() + 1))});
+                } else item = new QTreeWidgetItem(tree, {QString::fromStdString(path)});
                 pxs::presetview::addParameterEditors(*tree, *item, path, preset, step->presetOverrides, step->fadeOverride, true, update);
             }
         };
