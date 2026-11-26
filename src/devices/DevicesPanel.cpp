@@ -440,7 +440,7 @@ void DevicesPanel::fillTable()
         m_addresses->setCellWidget(row, c++, stored(minimum));
         m_addresses->setCellWidget(row, c, stored(maximum));
         if (d->kind == Kind::Dmx || d->kind == Kind::Midi) {
-            const auto adjust = [minimum, maximum, kind = d->kind, previous = a](Address next) mutable {
+            auto adjust = [minimum, maximum, kind = d->kind, previous = a](Address next) mutable {
                 if (minimum->value() == 0 && maximum->value() == core::nativeMaximum(kind, previous))
                     maximum->setValue(core::nativeMaximum(kind, next));
                 previous = next;

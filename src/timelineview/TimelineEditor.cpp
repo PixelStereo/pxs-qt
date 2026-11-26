@@ -192,7 +192,7 @@ static bool sameKeys(const std::vector<AnimKey> &a, const std::vector<AnimKey> &
 
 static bool sameTrack(const AnimTrack &a, const AnimTrack &b)
 {
-    if (a.layer != b.layer || a.param != b.param || a.enabled != b.enabled || a.oscillator != b.oscillator ||
+    if (a.layer != b.layer || a.param != b.param || a.enabled != b.enabled || a.oscillator != b.oscillator || a.normalizedOutput != b.normalizedOutput ||
         a.color != b.color || a.event != b.event || a.wave != b.wave || a.period != b.period || a.center != b.center ||
         a.amplitude != b.amplitude || a.phase != b.phase || a.seed != b.seed || !sameKeys(a.keys, b.keys) ||
         a.axes.size() != b.axes.size() || a.dataFilters != b.dataFilters)
@@ -1508,7 +1508,12 @@ double TrackRow::currentValue() const
 {
     const AnimTrack &t = editedTrack();
     double v = 0;
-    if (!m_host->animParamValue(t.layer, t.param, &v)) v = range().first;
+    if (!m_host->animParamValue(t.layer, t.param, &v)) return range().first;
+    if (t.normalizedOutput) {
+        for (const auto &parameter : m_ed->paramsOf(t.layer))
+            if (parameter.path == t.param && parameter.max > parameter.min)
+                return std::clamp((v - parameter.min) / (parameter.max - parameter.min), 0.0, 1.0);
+    }
     return v;
 }
 
@@ -1844,6 +1849,7 @@ const std::vector<ParamInfo> &AnimEditor::paramsOf(quint64 layer)
 
 std::pair<double, double> AnimEditor::rangeOf(const AnimTrack &t)
 {
+    if (t.normalizedOutput) return {0.0, 1.0};
     for (const ParamInfo &p : paramsOf(t.layer))
         if (p.path == t.param) return {p.min, p.max};
     return {0.0, 1.0};

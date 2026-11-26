@@ -41,6 +41,7 @@ struct AnimTrack {
     QString param;     // the number (see Engine::animatableParams): "opacity", "spatial/rotation", "fx/<fx>/param/<name>"…
     bool enabled = true;
     bool oscillator = false;
+    bool normalizedOutput = false; // track values are 0..1; the host maps them to the destination range
     std::vector<AnimKey> keys; // curve: sorted by time
     AnimWave wave = AnimWave::Sine;
     double period = 1, center = 0.5, amplitude = 0.5, phase = 0; // oscillator (phase: 0..1 of a period)

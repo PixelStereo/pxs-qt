@@ -44,6 +44,7 @@ AnimLoop animLoopFromKey(const QString &k) { return AnimLoop(keyIndex(kLoopKeys,
 // [t, v, curve, "current", {"in": [dt, dv], "out": [dt, dv]}] (all but t and v when they matter) and its oscillator
 void animTrackToJson(const AnimTrack &t, QJsonObject &o)
 {
+    if (t.normalizedOutput) o["normalized_output"] = true;
     if (!t.dataFilters.isEmpty()) o["data_filters"] = t.dataFilters;
     if (t.isPoint()) {
         o["type"] = QStringLiteral("point2d");
@@ -103,6 +104,7 @@ void animTrackToJson(const AnimTrack &t, QJsonObject &o)
 void animTrackFromJson(AnimTrack &t, const QJsonObject &o, double duration)
 {
     t.dataFilters = o.value("data_filters").toArray();
+    t.normalizedOutput = o.value("normalized_output").toBool();
     t.axes.clear();
     if (o.value("type").toString() == QLatin1String("point2d")) {
         t.color = false;
