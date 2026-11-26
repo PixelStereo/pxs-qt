@@ -31,7 +31,7 @@ public:
     static QByteArray buildResponse(const QString &instance, const QString &host, const QVector<Service> &services,
                                     const QList<QHostAddress> &addresses, quint32 ttl);
     // The names asked in a DNS query packet (empty for responses and malformed packets)
-    static QStringList parseQuestions(const QByteArray &packet);
+    static QStringList parseQuestions(const QByteArray &packet, int *end = nullptr);
     static QByteArray encodeName(const QString &dottedName);
 
 signals:

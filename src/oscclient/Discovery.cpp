@@ -56,15 +56,28 @@ bool Discovery::start(const QString &serviceType)
 {
     stop();
     m_type = serviceType + QStringLiteral(".local");
-    if (!m_socket.bind(QHostAddress::AnyIPv4, kMdnsPort, QUdpSocket::ShareAddress | QUdpSocket::ReuseAddressHint)) return false;
-    for (const QNetworkInterface &iface : QNetworkInterface::allInterfaces()) {
-        const auto flags = iface.flags();
-        if (!(flags & QNetworkInterface::IsUp) || !(flags & QNetworkInterface::CanMulticast) || (flags & QNetworkInterface::IsLoopBack)) continue;
-        if (m_socket.joinMulticastGroup(kGroup, iface)) m_interfaces << iface;
+    if (m_socket.bind(QHostAddress::AnyIPv4, kMdnsPort, QUdpSocket::ShareAddress | QUdpSocket::ReuseAddressHint)) {
+        for (const QNetworkInterface &iface : QNetworkInterface::allInterfaces()) {
+            const auto flags = iface.flags();
+            if (!(flags & QNetworkInterface::IsUp) || !(flags & QNetworkInterface::CanMulticast)) continue;
+            if (m_socket.joinMulticastGroup(kGroup, iface)) m_interfaces << iface;
+        }
+        if (m_interfaces.isEmpty() && !m_socket.joinMulticastGroup(kGroup)) {
+            qWarning("OSCQuery discovery: cannot join mDNS on UDP %d: %s", kMdnsPort, qPrintable(m_socket.errorString()));
+            m_socket.close();
+        }
+    } else {
+        qWarning("OSCQuery discovery: cannot bind UDP %d: %s", kMdnsPort, qPrintable(m_socket.errorString()));
     }
-    if (m_interfaces.isEmpty() && !m_socket.joinMulticastGroup(kGroup)) {
-        m_socket.close();
-        return false;
+    if (m_socket.state() != QAbstractSocket::BoundState) {
+        if (!m_socket.bind(QHostAddress::AnyIPv4, 0, QUdpSocket::DontShareAddress)) {
+            qWarning("OSCQuery discovery: cannot open a fallback UDP port: %s", qPrintable(m_socket.errorString()));
+            return false;
+        }
+        qWarning("OSCQuery discovery: UDP %d for unicast replies; queries still go to UDP %d", m_socket.localPort(), kMdnsPort);
+        for (const auto &iface : QNetworkInterface::allInterfaces())
+            if (iface.flags().testFlag(QNetworkInterface::IsUp) && iface.flags().testFlag(QNetworkInterface::CanMulticast))
+                m_interfaces << iface;
     }
     m_running = true;
     ask();
@@ -94,7 +107,12 @@ QByteArray Discovery::query(const QString &serviceType)
 
 void Discovery::ask()
 {
-    const QByteArray q = query(m_type.chopped(6));
+    QByteArray q = query(m_type.chopped(6));
+    if (m_socket.localPort() != kMdnsPort) {
+        // Legacy unicast mDNS queries use an ephemeral source port and a nonzero transaction ID.
+        q[0] = 0;
+        q[1] = 1;
+    }
     if (m_interfaces.isEmpty()) {
         m_socket.writeDatagram(q, kGroup, kMdnsPort);
         return;

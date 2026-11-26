@@ -31,14 +31,19 @@ bool OscService::start(quint16 oscPort, quint16 httpPort, bool announce)
     m_http.setBindAddress(where);
     m_http.setCorsOpen(!m_localOnly);
     if (m_localOnly) announce = false;
-    if (!m_udp.bind(where, oscPort, QUdpSocket::ShareAddress | QUdpSocket::ReuseAddressHint)) {
+    if (!m_udp.bind(where, oscPort, QUdpSocket::DontShareAddress)) {
         emit logMessage(QStringLiteral("OSC: cannot listen on UDP port %1: %2").arg(oscPort).arg(m_udp.errorString()));
-        return false;
+        if (m_udp.error() != QAbstractSocket::AddressInUseError ||
+            !m_udp.bind(where, 0, QUdpSocket::DontShareAddress)) return false;
+        emit logMessage(QStringLiteral("OSC: using UDP %1 instead").arg(m_udp.localPort()));
     }
     m_http.setOscPort(m_udp.localPort());
     if (!m_http.start(httpPort)) {
-        m_udp.close();
-        return false;
+        if (!httpPort || m_http.listenError() != QAbstractSocket::AddressInUseError || !m_http.start(0)) {
+            m_udp.close();
+            return false;
+        }
+        emit logMessage(QStringLiteral("OSCQuery: using TCP %1 instead of TCP %2").arg(m_http.port()).arg(httpPort));
     }
     QJsonObject extensions = convert::jsonObjectFromText(core::tree::defaultExtensionsJson());
     extensions["LISTEN"] = true;       // the WebSocket of the same port (IGNORE comes with it)

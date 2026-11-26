@@ -126,7 +126,7 @@ QByteArray MdnsResponder::buildResponse(const QString &instance, const QString &
     return packet + records;
 }
 
-QStringList MdnsResponder::parseQuestions(const QByteArray &p)
+QStringList MdnsResponder::parseQuestions(const QByteArray &p, int *end)
 {
     QStringList names;
     if (p.size() < 12) return names;
@@ -159,6 +159,7 @@ QStringList MdnsResponder::parseQuestions(const QByteArray &p)
         if (pos > p.size()) return QStringList();
         names << labels.join('.').toLower();
     }
+    if (end) *end = pos;
     return names;
 }
 
@@ -241,9 +242,12 @@ void MdnsResponder::onReadyRead()
     while (m_socket.hasPendingDatagrams()) {
         QByteArray data;
         data.resize(int(m_socket.pendingDatagramSize()));
-        m_socket.readDatagram(data.data(), data.size());
+        QHostAddress sender;
+        quint16 senderPort = 0;
+        m_socket.readDatagram(data.data(), data.size(), &sender, &senderPort);
 
-        const QStringList asked = parseQuestions(data);
+        int questionEnd = 12;
+        const QStringList asked = parseQuestions(data, &questionEnd);
         if (asked.isEmpty() || !m_running) continue;
 
         const QString host = m_host + QStringLiteral(".local");
@@ -256,7 +260,18 @@ void MdnsResponder::onReadyRead()
             }
         }
         const qint64 now = QDateTime::currentMSecsSinceEpoch();
-        if (relevant && now - m_lastAnswerMs > 250) { // do not answer a burst of identical queries one by one
+        if (relevant && senderPort != kMdnsPort) {
+            const auto response = buildResponse(m_instance, m_host, m_services, localAddresses(), 10);
+            // Legacy unicast replies repeat the transaction ID and original question.
+            QByteArray reply = response.left(12);
+            reply[0] = data[0];
+            reply[1] = data[1];
+            reply[4] = data[4];
+            reply[5] = data[5];
+            reply += data.mid(12, questionEnd - 12);
+            reply += response.mid(12);
+            m_socket.writeDatagram(reply, sender, senderPort);
+        } else if (relevant && now - m_lastAnswerMs > 250) { // do not answer a burst of identical queries one by one
             m_lastAnswerMs = now;
             announce(120);
         }

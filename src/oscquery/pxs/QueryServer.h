@@ -26,6 +26,7 @@ class QueryServer : public QObject {
 public:
     explicit QueryServer(const core::tree::Tree *tree, QObject *parent = nullptr);
 
+    QAbstractSocket::SocketError listenError() const { return m_server.serverError(); }
     bool start(quint16 port); // 0: any free port
     void stop();
     bool isListening() const { return m_server.isListening(); }
