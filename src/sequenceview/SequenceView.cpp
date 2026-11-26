@@ -298,9 +298,11 @@ SequenceView::SequenceView(Sequencer &sequencer, SequenceViewHost *host, QUndoSt
         if (!m_filling) QTimer::singleShot(0, this, [this] { store(); }); // not from inside the item's own change
     });
 
-    connect(m_table, &QTableWidget::cellClicked, this, [this](int row, int) {
-        if (m_inspectorSink) m_inspectorSink(stepInspector(row, nullptr));
+    connect(m_table, &QTableWidget::currentCellChanged, this, [this](int row, int, int previousRow, int) {
+        if (row != previousRow) scheduleInspectorUpdate();
     });
+    // Clicking the current row brings its inspector back after selecting another panel.
+    connect(m_table, &QTableWidget::cellClicked, this, [this] { scheduleInspectorUpdate(); });
     connect(&m_seq, &Sequencer::changed, this, [this] { rebuild(); });
     connect(&m_seq, &Sequencer::positionChanged, this, [this] { refresh(); });
     auto *poll = new QTimer(this); // the steps on their way
@@ -454,6 +456,17 @@ SetSequence::SetSequence(Sequencer &seq, int index, const Sequencer::Sequence &b
 }
 void SetSequence::redo() { m_seq.setSequence(m_index, m_after); }
 void SetSequence::undo() { m_seq.setSequence(m_index, m_before); }
+
+void SequenceView::scheduleInspectorUpdate()
+{
+    if (m_filling || !m_inspectorSink || m_inspectorUpdatePending) return;
+    m_inspectorUpdatePending = true;
+    QTimer::singleShot(0, this, [this] {
+        m_inspectorUpdatePending = false;
+        const int row = m_table->currentRow();
+        if (row >= 0 && m_inspectorSink) m_inspectorSink(stepInspector(row, nullptr));
+    });
+}
 
 void SequenceView::inspectStep(int row)
 {

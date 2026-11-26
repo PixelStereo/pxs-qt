@@ -6,6 +6,8 @@
 #include <QDragEnterEvent>
 #include <QDropEvent>
 #include <QHeaderView>
+#include <QKeyEvent>
+#include <QLineEdit>
 #include <QMouseEvent>
 #include <QMimeData>
 #include <QPushButton>
@@ -120,6 +122,29 @@ int main(int argc, char **argv)
     s.steps.push_back(b);
     seq.setSequence(0, s);
     view.rebuild();
+    QString inspected;
+    int inspections = 0;
+    view.setInspectorSink([&](QWidget *details) {
+        const auto *name = details->findChild<QLineEdit *>();
+        inspected = name ? name->text() : QString();
+        ++inspections;
+        delete details;
+    });
+    table->setCurrentCell(0, 0);
+    QApplication::processEvents();
+    const auto press = [&](int key) {
+        QKeyEvent event(QEvent::KeyPress, key, Qt::NoModifier);
+        QApplication::sendEvent(table, &event);
+        QApplication::processEvents();
+    };
+    press(Qt::Key_Down);
+    check(table->currentRow() == 1 && inspected == QLatin1String("Outro"), "Down shows the next step in the inspector");
+    const int beforeRight = inspections;
+    press(Qt::Key_Right);
+    check(inspections == beforeRight, "moving within the same row keeps the inspector");
+    press(Qt::Key_Up);
+    check(table->currentRow() == 0 && inspected == QLatin1String("Intro"), "Up shows the previous step in the inspector");
+
     check(seq.position() == 0 && seq.next() == 1, "next is 1 after playing 0");
     check(seq.loadAsNext(0, 0), "loadAsNext succeeds");
     check(seq.next() == 0, "loadAsNext sets next to 0");
