@@ -3,10 +3,14 @@
 #include <QApplication>
 #include <QComboBox>
 #include <QDoubleSpinBox>
+#include <QDragEnterEvent>
+#include <QDropEvent>
+#include <QFrame>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMenu>
 #include <QPainter>
 #include <QPushButton>
 #include <QShortcut>
@@ -195,9 +199,54 @@ SequenceView::SequenceView(Sequencer &sequencer, SequenceViewHost *host, QUndoSt
     m_table->horizontalHeaderItem(NextColumn)->setToolTip(QStringLiteral("GO: the next step waits for GO. AUTO: it follows once this one's "
                                                                          "action and post-wait are over. Double-click to flip"));
     m_table->verticalHeader()->setDefaultSectionSize(34);
-    m_table->verticalHeader()->setToolTip(QStringLiteral("Double-click: play this step"));
+    m_table->verticalHeader()->setToolTip(QStringLiteral("Double-click: play this step. Right-click: Load as Next"));
     m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_table->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_table->setDragEnabled(true);
+    m_table->setAcceptDrops(true);
+    m_table->viewport()->setAcceptDrops(true);
+    m_table->setDragDropMode(QAbstractItemView::DragDrop);
+    m_table->setDropIndicatorShown(false);
+    m_table->viewport()->installEventFilter(this);
+
+    m_dropLine = new QFrame(m_table->viewport());
+    m_dropLine->setObjectName(QStringLiteral("stepDropLine"));
+    m_dropLine->setStyleSheet(QStringLiteral("background:#4cd964;"));
+    m_dropLine->setAttribute(Qt::WA_TransparentForMouseEvents);
+    m_dropLine->hide();
+
+    m_table->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_table, &QTableWidget::customContextMenuRequested, this, [this](const QPoint &pos) {
+        const int row = m_table->rowAt(pos.y());
+        if (row < 0) return;
+        QMenu menu(this);
+        auto *load = menu.addAction(QStringLiteral("Load as Next"), this, [this, row] {
+            m_seq.loadAsNext(std::max(0, m_seq.current()), row);
+            refresh();
+        });
+        load->setToolTip(QStringLiteral("GO plays this step next"));
+        menu.addAction(QStringLiteral("Play this step"), this, [this, row] { m_seq.goTo(row); });
+        menu.addSeparator();
+        menu.addAction(QStringLiteral("Duplicate step"), this, [this, row] {
+            Sequencer::Sequence s = sequence();
+            if (row < int(s.steps.size())) {
+                Sequencer::Step copy = s.steps[size_t(row)];
+                copy.runtimeId = 0;
+                s.steps.insert(s.steps.begin() + row + 1, copy);
+                apply(s, QStringLiteral("Duplicate Step"));
+                m_table->selectRow(row + 1);
+            }
+        });
+        menu.addAction(QStringLiteral("Delete step"), this, [this, row] {
+            Sequencer::Sequence s = sequence();
+            if (row < int(s.steps.size())) {
+                s.steps.erase(s.steps.begin() + row);
+                apply(s, QStringLiteral("Remove Step"));
+            }
+        });
+        menu.exec(m_table->viewport()->mapToGlobal(pos));
+    });
+
     outer->addWidget(m_table, 1);
 
     auto *bottom = new QHBoxLayout;
@@ -426,6 +475,70 @@ void SequenceView::move(int by)
     std::swap(s.steps[size_t(row)], s.steps[size_t(to)]);
     apply(s, QStringLiteral("Move Step"));
     m_table->selectRow(to);
+}
+
+bool SequenceView::eventFilter(QObject *o, QEvent *e)
+{
+    if (m_table && o == m_table->viewport()) {
+        if (e->type() == QEvent::DragLeave) {
+            if (m_dropLine) m_dropLine->hide();
+        } else if (e->type() == QEvent::DragEnter || e->type() == QEvent::DragMove) {
+            auto *d = static_cast<QDropEvent *>(e);
+            if (d->source() == m_table) {
+                const int y = d->position().toPoint().y();
+                const int over = m_table->rowAt(y);
+                int lineY = 0;
+                if (over < 0) {
+                    const int last = m_table->rowCount() - 1;
+                    lineY = last >= 0 ? m_table->rowViewportPosition(last) + m_table->rowHeight(last) : 0;
+                } else {
+                    const int rowTop = m_table->rowViewportPosition(over);
+                    const int rowHeight = m_table->rowHeight(over);
+                    lineY = y < rowTop + rowHeight / 2 ? rowTop : rowTop + rowHeight;
+                }
+                if (m_dropLine) {
+                    m_dropLine->setGeometry(0, lineY - 1, m_table->viewport()->width(), 2);
+                    m_dropLine->show();
+                    m_dropLine->raise();
+                }
+                d->setDropAction(Qt::CopyAction);
+                d->accept();
+                return true;
+            }
+        } else if (e->type() == QEvent::Drop) {
+            if (m_dropLine) m_dropLine->hide();
+            auto *d = static_cast<QDropEvent *>(e);
+            if (d->source() == m_table) {
+                const int y = d->position().toPoint().y();
+                const int over = m_table->rowAt(y);
+                int target = 0;
+                if (over < 0) {
+                    target = m_table->rowCount();
+                } else {
+                    const int rowTop = m_table->rowViewportPosition(over);
+                    const int rowHeight = m_table->rowHeight(over);
+                    target = y < rowTop + rowHeight / 2 ? over : over + 1;
+                }
+                const int fromRow = m_table->currentRow();
+                if (fromRow >= 0 && fromRow < m_table->rowCount() && target != fromRow && target != fromRow + 1) {
+                    Sequencer::Sequence s = sequence();
+                    if (fromRow < int(s.steps.size())) {
+                        Sequencer::Step st = s.steps[size_t(fromRow)];
+                        s.steps.erase(s.steps.begin() + fromRow);
+                        if (target > fromRow) --target;
+                        target = std::clamp(target, 0, int(s.steps.size()));
+                        s.steps.insert(s.steps.begin() + target, st);
+                        apply(s, QStringLiteral("Move Step"));
+                        m_table->selectRow(target);
+                    }
+                }
+                d->setDropAction(Qt::CopyAction);
+                d->accept();
+                return true;
+            }
+        }
+    }
+    return QWidget::eventFilter(o, e);
 }
 
 } // namespace pxs::sequenceview

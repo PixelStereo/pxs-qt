@@ -13,6 +13,7 @@
 #include <utility>
 #include <vector>
 
+class QFrame;
 class QLabel;
 class QPushButton;
 class QTableWidget;
@@ -65,10 +66,15 @@ private:
     void move(int by);   // the selected step up or down
     bool typing() const; // a step being edited: Space and Escape are not GO and Stop all
 
+protected:
+    bool eventFilter(QObject *o, QEvent *e) override;
+
+private:
     Sequencer &m_seq;
     SequenceViewHost *m_host;
     QUndoStack *m_undo;
     QTableWidget *m_table;
+    QFrame *m_dropLine = nullptr;
     QPushButton *m_go;
     QLabel *m_next, *m_state;
     bool m_filling = false;

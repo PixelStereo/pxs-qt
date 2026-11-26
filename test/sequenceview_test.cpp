@@ -89,6 +89,19 @@ int main(int argc, char **argv)
     seq.advance(0.6);
     check(!host.controlled.empty() && host.controlled.back().first == 5 && host.controlled.back().second == AnimAction::Play, "then its timeline plays");
 
+    // Load as Next
+    seq.stopAll();
+    Sequencer::Step b;
+    b.description = QStringLiteral("Outro");
+    b.timeline = 6;
+    s = seq.sequence(0);
+    s.steps.push_back(b);
+    seq.setSequence(0, s);
+    view.rebuild();
+    check(seq.position() == 0 && seq.next() == 1, "next is 1 after playing 0");
+    check(seq.loadAsNext(0, 0), "loadAsNext succeeds");
+    check(seq.next() == 0, "loadAsNext sets next to 0");
+
     if (failures) std::fprintf(stderr, "sequenceview: %d failure(s)\n", failures);
     else std::puts("sequenceview: ok");
     return failures ? 1 : 0;
