@@ -329,6 +329,7 @@ PresetView::~PresetView() = default;
 
 void PresetView::rebuildScopes()
 {
+    const auto previous = m_scopeCombo->currentData();
     m_scopeCombo->clear();
     const auto scopes = m_host ? m_host->scopes() : std::vector<std::pair<QString, QString>>{{QStringLiteral(""), QStringLiteral("Tout l'arbre (Self)")}};
     for (const auto &[prefix, label] : scopes) m_scopeCombo->addItem(label, prefix);
@@ -341,11 +342,16 @@ void PresetView::rebuildScopes()
             }
         }
     }
+    const int index = m_scopeCombo->findData(previous);
+    if (index >= 0) m_scopeCombo->setCurrentIndex(index);
 }
 
 void PresetView::setPresets(const std::vector<pxs::core::tree::Preset> &presets)
 {
     const int selected = currentPresetIndex();
+    m_updatingTree = true;
+    m_paramsTree->clear();
+    m_updatingTree = false;
     m_presets = presets;
     refreshPresetsList();
     if (!m_presets.empty()) selectPreset(std::clamp(selected, 0, int(m_presets.size()) - 1));
@@ -383,7 +389,11 @@ void PresetView::captureCurrent(const QString &customName)
     std::vector<std::string> paths;
     collectHoldablePaths(m_tree.root(), prefix, paths);
 
-    pxs::core::tree::Preset p = pxs::core::tree::capture(m_tree, paths);
+    pxs::core::tree::Preset p = paths.empty() && !prefix.empty() ? pxs::core::tree::Preset{} : pxs::core::tree::capture(m_tree, paths);
+    if (p.isEmpty()) {
+        m_statusLabel->setText(QStringLiteral("No known values in this scope"));
+        return;
+    }
     QString name = customName;
     if (name.isEmpty()) {
         const QString scopeText = m_scopeCombo->currentText();
@@ -483,7 +493,7 @@ void PresetView::updateActivePresetFromLive()
         captureCurrent(QString::fromStdString(p.name));
         return;
     }
-    p = pxs::core::tree::capture(m_tree, checkedAddresses);
+    for (const auto &[path, value] : pxs::core::tree::capture(m_tree, checkedAddresses).values) p.values[path] = value;
     p.name = m_nameEdit->text().toStdString();
     showPresetDetails(row);
     refreshPresetsList();

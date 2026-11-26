@@ -50,6 +50,7 @@ public:
 
     const std::vector<pxs::core::tree::Preset> &presets() const { return m_presets; }
     void setRecaller(std::function<void(int)> recall) { m_recall = std::move(recall); }
+    void rebuildScopes();
     void setPresets(const std::vector<pxs::core::tree::Preset> &presets);
 
     int currentPresetIndex() const;
@@ -65,7 +66,6 @@ signals:
     void presetRecalled(int index, const QString &name);
 
 private:
-    void rebuildScopes();
     void refreshPresetsList();
     void showPresetDetails(int index);
     void updateActivePresetFromLive();

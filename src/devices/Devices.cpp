@@ -103,8 +103,8 @@ void Devices::found(const pxs::oscquery::Device &device)
                 Device moved = *d;
                 moved.host = utf8(host);
                 moved.port = device.port;
-                m_registry.put(moved);
-                openClient(d->id);
+                const auto id = m_registry.put(moved);
+                openClient(id);
             }
             return;
         }
