@@ -230,6 +230,7 @@ DevicesPanel::DevicesPanel(Devices *devices, const QString &hint, QWidget *paren
     root->addWidget(m_pages, 1);
 
     connect(m_list, &QListWidget::currentRowChanged, this, [this] { showSelected(); });
+    connect(m_list, &QListWidget::itemClicked, this, [this] { emit deviceSelected(selected()); });
     connect(remove, &QPushButton::clicked, this, [this] {
         if (const quint64 id = selected()) m_d->remove(id);
     });

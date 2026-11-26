@@ -21,12 +21,16 @@ class Devices;
 
 class DevicesPanel : public QWidget
 {
+    Q_OBJECT
 public:
     // `hint`: what the devices are for in this application ("What the tracks of the timelines can drive.")
     explicit DevicesPanel(Devices *devices, const QString &hint = {}, QWidget *parent = nullptr);
 
     quint64 selected() const;
     void select(quint64 id);
+
+signals:
+    void deviceSelected(quint64 id);
 
 private:
     void refresh();      // the list, from the devices
