@@ -399,6 +399,19 @@ bool Devices::value(quint64 id, const QString &path, double *v) const
     return false;
 }
 
+std::optional<int> Devices::dmxLevel(quint64 id, const QString &path) const
+{
+    const Device *device = m_registry.find(id);
+    if (!device || device->kind != Kind::Dmx) return std::nullopt;
+    const auto *address = device->address(utf8(path));
+    if (!address) return std::nullopt;
+    const auto [channel, width] = core::dmxChannels(*device, *address);
+    const auto universe = m_universes.find(device->universe);
+    if (!channel || universe == m_universes.end() || universe->second.size() < channel - 1 + width) return std::nullopt;
+    const auto coarse = static_cast<unsigned char>(universe->second.at(channel - 1));
+    return width == 2 ? (int(coarse) << 8) | static_cast<unsigned char>(universe->second.at(channel)) : int(coarse);
+}
+
 bool Devices::send(quint64 id, const QString &path, double value)
 {
     const Device *d = m_registry.find(id);

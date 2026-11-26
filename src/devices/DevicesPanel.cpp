@@ -38,12 +38,43 @@ QStringList columns(Kind kind)
 {
     switch (kind) {
     case Kind::Osc: return {QStringLiteral("Address"), QStringLiteral("Type"), QStringLiteral("Min"), QStringLiteral("Max")};
-    case Kind::Dmx: return {QStringLiteral("Address"), QStringLiteral("Channel"), QStringLiteral("16 bits"), QStringLiteral("Min"), QStringLiteral("Max")};
+    case Kind::Dmx: return {QStringLiteral("Address"), QStringLiteral("Channel"), QStringLiteral("16 bits"), QStringLiteral("Input min"), QStringLiteral("Input max")};
     case Kind::Midi: return {QStringLiteral("Address"), QStringLiteral("Message"), QStringLiteral("Number"), QStringLiteral("Min"), QStringLiteral("Max")};
     case Kind::OscQuery: break;
     }
     return {};
 }
+
+class MidiPortBox : public QComboBox
+{
+public:
+    MidiPortBox()
+    {
+        setEditable(true);
+        setInsertPolicy(QComboBox::NoInsert);
+        lineEdit()->setPlaceholderText(QStringLiteral("First available output"));
+    }
+
+    void refreshPorts(const QString &selected)
+    {
+        const QSignalBlocker comboBlock(this);
+        const QSignalBlocker editBlock(lineEdit());
+        const auto outputs = pxs::midi::outputNames();
+        clear();
+        addItem(QString());
+        addItems(outputs);
+        if (!selected.isEmpty() && findText(selected) < 0) addItem(selected);
+        setCurrentIndex(findText(selected));
+        lineEdit()->setPlaceholderText(outputs.isEmpty() ? QStringLiteral("No MIDI output detected")
+                                                         : QStringLiteral("First available output"));
+    }
+
+    void showPopup() override
+    {
+        refreshPorts(currentText());
+        QComboBox::showPopup();
+    }
+};
 
 QComboBox *typeBox(char type)
 {
@@ -202,8 +233,7 @@ DevicesPanel::DevicesPanel(Devices *devices, const QString &hint, QWidget *paren
     m_universe->setToolTip(QStringLiteral("The application's universe: its DMX outputs say where it goes on the network"));
     m_start = wholeBox(1, 512, 1);
     m_start->setToolTip(QStringLiteral("The fixture's first channel in its universe"));
-    m_midiPort = new QComboBox;
-    m_midiPort->setEditable(true);
+    m_midiPort = new MidiPortBox;
     m_midiPort->setToolTip(QStringLiteral("The MIDI output (empty: the first one)"));
     m_channel = wholeBox(1, 16, 1);
     m_form->addRow(QStringLiteral("Name"), m_name);
@@ -239,7 +269,8 @@ DevicesPanel::DevicesPanel(Devices *devices, const QString &hint, QWidget *paren
     });
     for (QLineEdit *e : {m_name, m_host}) connect(e, &QLineEdit::editingFinished, this, [this] { store(); });
     for (QSpinBox *b : {m_port, m_universe, m_start, m_channel}) connect(b, &QSpinBox::editingFinished, this, [this] { store(); });
-    connect(m_midiPort, &QComboBox::currentTextChanged, this, [this] { store(); });
+    connect(m_midiPort, &QComboBox::activated, this, [this] { store(); });
+    connect(m_midiPort->lineEdit(), &QLineEdit::editingFinished, this, [this] { store(); });
     connect(addAddress, &QPushButton::clicked, this, [this] {
         const Device *d = m_d->find(selected());
         if (!d || d->kind == Kind::OscQuery) return;
@@ -352,10 +383,7 @@ void DevicesPanel::showSelected()
     if (!m_start->hasFocus()) m_start->setValue(d->start);
     if (!m_channel->hasFocus()) m_channel->setValue(d->midiChannel);
     if (midi && !m_midiPort->hasFocus()) {
-        m_midiPort->clear();
-        m_midiPort->addItem(QString());
-        m_midiPort->addItems(pxs::midi::outputNames());
-        m_midiPort->setCurrentText(text(d->midiPort));
+        static_cast<MidiPortBox *>(m_midiPort)->refreshPorts(text(d->midiPort));
     }
     if (m_tableFor != d->id || m_tableKind != int(d->kind) || m_addresses->rowCount() != int(d->addresses.size())) fillTable();
     m_filling = false;

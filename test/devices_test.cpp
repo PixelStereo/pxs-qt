@@ -123,7 +123,9 @@ static void dmxDevices()
     const quint64 id = devices.add(spot);
     CHECK(devices.online(id));
     CHECK(devices.status(id) == QStringLiteral("Universe 2, channels 101–103"));
+    CHECK(!devices.dmxLevel(id, "/dimmer"));
     CHECK(devices.send(id, "/dimmer", 1) && devices.send(id, "/pan", 0));
+    CHECK(devices.dmxLevel(id, "/dimmer") == 255 && devices.dmxLevel(id, "/pan") == 32768);
     const auto universes = devices.dmxUniverses();
     CHECK(universes.count(2) && universes.at(2).size() == 512);
     if (universes.count(2)) {

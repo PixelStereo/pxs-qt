@@ -76,6 +76,9 @@ public:
     bool sendTo(quint64 id, const QString &path, char type, double value);
     int sent() const { return m_sent; } // messages sent since the start (shown)
 
+    // Encoded 8- or 16-bit level in the current DMX universe buffer, when available.
+    std::optional<int> dmxLevel(quint64 id, const QString &path) const;
+
     // The DMX universes, by the application's numbering, 512 bytes each: what its DMX devices were last sent
     std::map<int, QByteArray> dmxUniverses() const { return m_universes; }
 
