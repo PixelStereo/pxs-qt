@@ -1,6 +1,10 @@
 #include "pxs/PresetView.h"
 
 #include <QComboBox>
+#include <QDoubleSpinBox>
+#include <QMimeData>
+#include <QRandomGenerator>
+#include <QSignalBlocker>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QJsonArray>
@@ -20,6 +24,20 @@
 namespace pxs::presetview {
 
 namespace {
+
+class PresetList : public QListWidget {
+    QMimeData *mimeData(const QList<QListWidgetItem *> &items) const override
+    {
+        auto *data = new QMimeData;
+        if (!items.empty()) data->setData("application/x-pxs-preset", items.front()->data(Qt::UserRole).toByteArray());
+        return data;
+    }
+};
+
+std::string newPresetId()
+{
+    return std::to_string(QRandomGenerator::global()->generate64() | (quint64(1) << 63));
+}
 
 QString formatJsonValue(const std::string &jsonText)
 {
@@ -57,6 +75,48 @@ void collectHoldablePaths(const pxs::core::tree::Node &n, const std::string &pre
 }
 
 } // namespace
+
+void addParameterEditors(QTreeWidget &tree, QTreeWidgetItem &item, const std::string &path,
+                         const pxs::core::tree::Preset &base, pxs::core::tree::Preset &edits,
+                         double fadeOverride, bool step, const std::function<void()> &changed)
+{
+    const auto effective = base.resolved(step ? edits : pxs::core::tree::Preset{}, fadeOverride);
+    for (int column = 1; column <= 3; ++column) {
+        auto *edit = new QLineEdit;
+        auto &numbers = column == 2 ? edits.times : edits.delays;
+        const auto &effectiveNumbers = column == 2 ? effective.times : effective.delays;
+        const auto value = edits.values.find(path);
+        const auto number = numbers.find(path);
+        if (column == 1) {
+            edit->setText(value == edits.values.end() ? QString() : QString::fromStdString(value->second));
+            edit->setPlaceholderText(QString::fromStdString(effective.values.at(path)));
+            edit->setToolTip(QStringLiteral("OSCQuery value as JSON arguments. Clear to inherit in a step."));
+        } else {
+            if (number != numbers.end()) edit->setText(QString::number(number->second));
+            edit->setPlaceholderText(QStringLiteral("%1 · inherited").arg(effectiveNumbers.at(path)));
+            edit->setToolTip(QStringLiteral("Seconds. Clear to inherit; zero is explicit."));
+        }
+        tree.setItemWidget(&item, column, edit);
+        QObject::connect(edit, &QLineEdit::editingFinished, edit, [edit, path, column, step, &edits, &numbers, changed] {
+            const QString text = edit->text().trimmed();
+            if (column == 1) {
+                if (text.isEmpty() && step) edits.values.erase(path);
+                else {
+                    const auto json = QJsonDocument::fromJson(text.toUtf8());
+                    if (!json.isArray() || json.array().isEmpty()) return;
+                    edits.values[path] = json.toJson(QJsonDocument::Compact).toStdString();
+                }
+            } else if (text.isEmpty()) numbers.erase(path);
+            else {
+                bool ok = false;
+                const double seconds = text.toDouble(&ok);
+                if (!ok || !(seconds >= 0 && seconds <= 3600)) return;
+                numbers[path] = seconds;
+            }
+            changed();
+        });
+    }
+}
 
 PresetView::PresetView(pxs::core::tree::Tree &tree, QUndoStack *undo, PresetHost *host, QWidget *parent)
     : QWidget(parent), m_tree(tree), m_undo(undo), m_host(host)
@@ -100,7 +160,8 @@ PresetView::PresetView(pxs::core::tree::Tree &tree, QUndoStack *undo, PresetHost
     leftToolbar->addWidget(m_deleteBtn);
     leftLayout->addLayout(leftToolbar);
 
-    m_presetList = new QListWidget;
+    m_presetList = new PresetList;
+    m_presetList->setDragEnabled(true);
     m_presetList->setSelectionMode(QAbstractItemView::SingleSelection);
     leftLayout->addWidget(m_presetList, 1);
 
@@ -129,6 +190,18 @@ PresetView::PresetView(pxs::core::tree::Tree &tree, QUndoStack *undo, PresetHost
 
     rightHeader->addWidget(m_nameEdit, 1);
     rightHeader->addWidget(m_updateBtn);
+    m_fade = new QDoubleSpinBox;
+    m_fade->setRange(0, 3600);
+    m_fade->setDecimals(3);
+    m_fade->setSuffix(QStringLiteral(" s"));
+    rightHeader->addWidget(new QLabel(QStringLiteral("Fade")));
+    rightHeader->addWidget(m_fade);
+    connect(m_fade, &QDoubleSpinBox::editingFinished, this, [this] {
+        const int row = currentPresetIndex();
+        if (row < 0 || row >= int(m_presets.size()) || m_presets[row].fade == m_fade->value()) return;
+        m_presets[row].fade = m_fade->value();
+        emit presetsChanged();
+    });
     rightHeader->addWidget(m_recallBtn);
     rightLayout->addLayout(rightHeader);
 
@@ -167,6 +240,7 @@ PresetView::PresetView(pxs::core::tree::Tree &tree, QUndoStack *undo, PresetHost
         menu.addSeparator();
         menu.addAction(QStringLiteral("Duplicate"), this, [this, row] {
             pxs::core::tree::Preset copy = m_presets[size_t(row)];
+            copy.id = newPresetId();
             copy.name += " (Copy)";
             m_presets.insert(m_presets.begin() + row + 1, copy);
             refreshPresetsList();
@@ -189,6 +263,7 @@ PresetView::PresetView(pxs::core::tree::Tree &tree, QUndoStack *undo, PresetHost
         const int row = m_presetList->currentRow();
         if (row >= 0 && row < int(m_presets.size())) {
             pxs::core::tree::Preset copy = m_presets[size_t(row)];
+            copy.id = newPresetId();
             copy.name += " (Copy)";
             m_presets.insert(m_presets.begin() + row + 1, copy);
             refreshPresetsList();
@@ -270,9 +345,10 @@ void PresetView::rebuildScopes()
 
 void PresetView::setPresets(const std::vector<pxs::core::tree::Preset> &presets)
 {
+    const int selected = currentPresetIndex();
     m_presets = presets;
     refreshPresetsList();
-    if (!m_presets.empty()) selectPreset(0);
+    if (!m_presets.empty()) selectPreset(std::clamp(selected, 0, int(m_presets.size()) - 1));
 }
 
 int PresetView::currentPresetIndex() const
@@ -293,6 +369,7 @@ void PresetView::refreshPresetsList()
         const auto &p = m_presets[i];
         const QString name = p.name.empty() ? QStringLiteral("Preset %1").arg(i + 1) : QString::fromStdString(p.name);
         auto *item = new QListWidgetItem(QStringLiteral("%1   (%2 params)").arg(name).arg(p.values.size()));
+        item->setData(Qt::UserRole, QByteArray::fromStdString(p.id));
         m_presetList->addItem(item);
     }
     if (current >= 0 && current < m_presetList->count()) m_presetList->setCurrentRow(current);
@@ -313,6 +390,7 @@ void PresetView::captureCurrent(const QString &customName)
         name = QStringLiteral("Preset %1 (%2)").arg(m_presets.size() + 1).arg(scopeText);
     }
     p.name = name.toStdString();
+    p.id = newPresetId();
     m_presets.push_back(p);
     refreshPresetsList();
     selectPreset(int(m_presets.size()) - 1);
@@ -324,9 +402,14 @@ bool PresetView::recallPreset(int index)
 {
     if (index < 0 || index >= int(m_presets.size())) return false;
     const auto &p = m_presets[size_t(index)];
-    const auto res = pxs::core::tree::recall(m_tree, p);
-    const QString name = QString::fromStdString(p.name);
-    m_statusLabel->setText(QStringLiteral("▶ Rappelé '%1' : %2 appliqué(s)").arg(name).arg(res.applied));
+    const auto name = QString::fromStdString(p.name);
+    if (m_recall) {
+        m_recall(index);
+        m_statusLabel->setText(QStringLiteral("Recall: %1").arg(name));
+    } else {
+        const auto res = pxs::core::tree::recall(m_tree, p);
+        m_statusLabel->setText(QStringLiteral("%1 values applied").arg(res.applied));
+    }
     emit presetRecalled(index, name);
     return true;
 }
@@ -335,6 +418,8 @@ void PresetView::showPresetDetails(int index)
 {
     m_updatingTree = true;
     m_paramsTree->clear();
+    m_paramsTree->setHeaderLabels({QStringLiteral("Parameter"), QStringLiteral("Value"), QStringLiteral("Time (s)"), QStringLiteral("Delay (s)")});
+    m_fade->setEnabled(index >= 0 && index < int(m_presets.size()));
     if (index < 0 || index >= int(m_presets.size())) {
         m_nameEdit->setEnabled(false);
         m_nameEdit->clear();
@@ -343,7 +428,8 @@ void PresetView::showPresetDetails(int index)
         m_updatingTree = false;
         return;
     }
-    const auto &p = m_presets[size_t(index)];
+    auto &p = m_presets[size_t(index)];
+    m_fade->setValue(p.fade);
     m_nameEdit->setEnabled(true);
     m_nameEdit->setText(QString::fromStdString(p.name));
     m_updateBtn->setEnabled(true);
@@ -370,6 +456,7 @@ void PresetView::showPresetDetails(int index)
         leaf->setCheckState(0, Qt::Checked);
         leaf->setData(0, Qt::UserRole, fullPath);
         leaf->setData(1, Qt::UserRole, QString::fromStdString(valJson));
+        addParameterEditors(*m_paramsTree, *leaf, address, p, p, -1, false, [this] { emit presetsChanged(); });
     }
     m_updatingTree = false;
 }

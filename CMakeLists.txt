@@ -108,7 +108,7 @@ add_library(pxs_sequence STATIC src/sequence/Sequencer.cpp src/sequence/BeatCloc
 add_library(pxs::sequence ALIAS pxs_sequence)
 set_target_properties(pxs_sequence PROPERTIES AUTOMOC ON POSITION_INDEPENDENT_CODE ON)
 target_include_directories(pxs_sequence PUBLIC src/sequence)
-target_link_libraries(pxs_sequence PUBLIC pxs::interaction pxs::params Qt6::Core)
+target_link_libraries(pxs_sequence PUBLIC pxs-core::tree pxs::interaction pxs::params Qt6::Core)
 
 # A sequence as a cue list on screen, for an application whose steps drive timelines (OSCQlock): GO, the step on standby, the times
 # of the steps on their way in NyxMap's colours, undo steps. Qt Widgets
@@ -123,6 +123,7 @@ add_library(pxs_presetview STATIC src/presetview/PresetView.cpp src/presetview/p
 add_library(pxs::presetview ALIAS pxs_presetview)
 set_target_properties(pxs_presetview PROPERTIES AUTOMOC ON POSITION_INDEPENDENT_CODE ON)
 target_include_directories(pxs_presetview PUBLIC src/presetview)
+target_link_libraries(pxs_sequenceview PRIVATE pxs::presetview)
 target_link_libraries(pxs_presetview PUBLIC pxs::tree pxs::params pxs::theme Qt6::Widgets)
 
 # Expose an interface's own widgets (check box, number field, menu, text field, button) as parameters and messages

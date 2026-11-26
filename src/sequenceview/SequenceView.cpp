@@ -1,4 +1,9 @@
 #include "pxs/SequenceView.h"
+#include <pxs/PresetView.h>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QMimeData>
+#include <QTreeWidget>
 
 #include <QApplication>
 #include <QComboBox>
@@ -220,6 +225,7 @@ SequenceView::SequenceView(Sequencer &sequencer, SequenceViewHost *host, QUndoSt
         const int row = m_table->rowAt(pos.y());
         if (row < 0) return;
         QMenu menu(this);
+        menu.addAction(QStringLiteral("Inspect Step…"), this, [this, row] { inspectStep(row); });
         auto *load = menu.addAction(QStringLiteral("Load as Next"), this, [this, row] {
             m_seq.loadAsNext(std::max(0, m_seq.current()), row);
             refresh();
@@ -249,25 +255,6 @@ SequenceView::SequenceView(Sequencer &sequencer, SequenceViewHost *host, QUndoSt
 
     outer->addWidget(m_table, 1);
 
-    auto *bottom = new QHBoxLayout;
-    auto *add = new QPushButton(QStringLiteral("+ Step"));
-    add->setObjectName(QStringLiteral("accent"));
-    auto *remove = new QPushButton(QStringLiteral("− Step"));
-    auto *up = new QPushButton(QStringLiteral("↑"));
-    auto *down = new QPushButton(QStringLiteral("↓"));
-    up->setFixedWidth(34);
-    down->setFixedWidth(34);
-    auto *hint = new QLabel(QStringLiteral("A step's pre-wait after its GO, what it does to a timeline, its post-wait; GO waits for the next GO, AUTO follows."));
-    hint->setObjectName(QStringLiteral("caption"));
-    hint->setWordWrap(true);
-    bottom->addWidget(add);
-    bottom->addWidget(remove);
-    bottom->addWidget(up);
-    bottom->addWidget(down);
-    bottom->addSpacing(10);
-    bottom->addWidget(hint, 1);
-    outer->addLayout(bottom);
-
     connect(m_go, &QPushButton::clicked, this, [this] { m_seq.go(); });
     connect(back, &QPushButton::clicked, this, [this] { m_seq.back(); });
     connect(stop, &QPushButton::clicked, this, [this] { m_seq.stop(); });
@@ -285,26 +272,15 @@ SequenceView::SequenceView(Sequencer &sequencer, SequenceViewHost *host, QUndoSt
     connect(escape, &QShortcut::activated, this, [this, stopAll] {
         if (!typing()) stopAll->click();
     });
-    connect(add, &QPushButton::clicked, this, [this] {
-        Sequencer::Sequence s = sequence();
-        Sequencer::Step st;
-        st.description = QStringLiteral("Step %1").arg(s.steps.size() + 1);
-        st.timeline = m_host ? m_host->currentTimeline() : 0;
-        st.action = AnimAction::Play;
-        const int at = m_table->currentRow() >= 0 ? m_table->currentRow() + 1 : int(s.steps.size());
-        s.steps.insert(s.steps.begin() + at, st);
-        apply(s, QStringLiteral("New Step"));
-        m_table->selectRow(at);
-    });
-    connect(remove, &QPushButton::clicked, this, [this] {
+    auto *remove = new QShortcut(QKeySequence::Delete, m_table);
+    connect(remove, &QShortcut::activated, this, [this] {
+        if (typing()) return;
         const int row = m_table->currentRow();
         Sequencer::Sequence s = sequence();
         if (row < 0 || row >= int(s.steps.size())) return;
         s.steps.erase(s.steps.begin() + row);
         apply(s, QStringLiteral("Remove Step"));
     });
-    connect(up, &QPushButton::clicked, this, [this] { move(-1); });
-    connect(down, &QPushButton::clicked, this, [this] { move(1); });
     connect(m_table->verticalHeader(), &QHeaderView::sectionDoubleClicked, this, [this](int row) { m_seq.goTo(row); });
     connect(m_table, &QTableWidget::cellDoubleClicked, this, [this](int row, int column) {
         if (column != NextColumn) return;
@@ -364,7 +340,13 @@ void SequenceView::rebuild()
 
         auto *action = new QComboBox;
         auto *timeline = new QComboBox;
-        if (group) { // several actions (a group): shown, not edited here
+        if (st.preset && !group) {
+            action->addItem(QStringLiteral("Recall"));
+            action->setEnabled(false);
+            const auto *preset = m_host ? m_host->preset(st.preset) : nullptr;
+            timeline->addItem(preset ? QString::fromStdString(preset->name) : QStringLiteral("Missing preset"));
+            timeline->setEnabled(false);
+        } else if (group) { // several actions (a group): shown, not edited here
             action->addItem(QStringLiteral("%1 actions").arg(st.actions.size()));
             action->setEnabled(false);
             timeline->addItem(QStringLiteral("—"));
@@ -436,7 +418,7 @@ void SequenceView::store()
         if (const QTableWidgetItem *text = m_table->item(row, TextColumn)) st.description = text->text();
         if (const QTableWidgetItem *pre = m_table->item(row, PreWaitColumn)) st.preWait = pre->data(Qt::EditRole).toDouble();
         if (const QTableWidgetItem *post = m_table->item(row, PostWaitColumn)) st.postWait = post->data(Qt::EditRole).toDouble();
-        if (!st.actions.empty()) continue; // a group: its actions as they are
+        if (!st.actions.empty() || st.preset) continue; // a group: its actions as they are
         if (auto *action = qobject_cast<QComboBox *>(m_table->cellWidget(row, ActionColumn))) st.action = AnimAction(action->currentIndex());
         if (auto *timeline = qobject_cast<QComboBox *>(m_table->cellWidget(row, TimelineColumn))) st.timeline = timeline->currentData().toULongLong();
         if (const QTableWidgetItem *value = m_table->item(row, ValueColumn); value && !value->text().isEmpty()) {
@@ -466,15 +448,52 @@ SetSequence::SetSequence(Sequencer &seq, int index, const Sequencer::Sequence &b
 void SetSequence::redo() { m_seq.setSequence(m_index, m_after); }
 void SetSequence::undo() { m_seq.setSequence(m_index, m_before); }
 
-void SequenceView::move(int by)
+void SequenceView::inspectStep(int row)
 {
-    const int row = m_table->currentRow();
-    Sequencer::Sequence s = sequence();
-    const int to = row + by;
-    if (row < 0 || to < 0 || to >= int(s.steps.size())) return;
-    std::swap(s.steps[size_t(row)], s.steps[size_t(to)]);
-    apply(s, QStringLiteral("Move Step"));
-    m_table->selectRow(to);
+    auto edited = sequence();
+    if (row < 0 || row >= int(edited.steps.size())) return;
+    auto &step = edited.steps[size_t(row)];
+    const auto *source = step.preset && m_host ? m_host->preset(step.preset) : nullptr;
+    QDialog dialog(this);
+    dialog.setWindowTitle(QStringLiteral("Step · %1").arg(step.description));
+    auto *layout = new QVBoxLayout(&dialog);
+    if (source) {
+        const auto preset = *source;
+        auto *fade = new QLineEdit(step.fadeOverride < 0 ? QString() : QString::number(step.fadeOverride));
+        fade->setPlaceholderText(QStringLiteral("%1 s · inherited").arg(preset.fade));
+        layout->addWidget(new QLabel(QStringLiteral("Default fade override (s)")));
+        layout->addWidget(fade);
+        auto *tree = new QTreeWidget;
+        tree->setHeaderLabels({QStringLiteral("Parameter"), QStringLiteral("Value"), QStringLiteral("Time (s)"), QStringLiteral("Delay (s)")});
+        auto *duration = new QLabel;
+        const auto update = [&] {
+            bool ok = false;
+            const auto seconds = fade->text().toDouble(&ok);
+            step.fadeOverride = ok && seconds >= 0 && seconds <= 3600 ? seconds : -1;
+            duration->setText(QStringLiteral("Effective duration: %1 s").arg(preset.resolved(step.presetOverrides, step.fadeOverride).duration()));
+        };
+        const auto populate = [&] {
+            tree->clear();
+            for (const auto &[path, value] : preset.values) {
+                auto *item = new QTreeWidgetItem(tree, {QString::fromStdString(path)});
+                pxs::presetview::addParameterEditors(*tree, *item, path, preset, step.presetOverrides, step.fadeOverride, true, update);
+            }
+        };
+        populate();
+        QObject::connect(fade, &QLineEdit::editingFinished, &dialog, [&] { update(); populate(); });
+        layout->addWidget(tree);
+        layout->addWidget(duration);
+        update();
+        auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+        layout->addWidget(buttons);
+        connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+        connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+        dialog.resize(700, 360);
+        if (dialog.exec() == QDialog::Accepted) apply(edited, QStringLiteral("Edit preset overrides"));
+        return;
+    }
+    layout->addWidget(new QLabel(QStringLiteral("Pre-wait: %1 s · Post-wait: %2 s").arg(step.preWait).arg(step.postWait)));
+    dialog.exec();
 }
 
 bool SequenceView::eventFilter(QObject *o, QEvent *e)
@@ -484,7 +503,7 @@ bool SequenceView::eventFilter(QObject *o, QEvent *e)
             if (m_dropLine) m_dropLine->hide();
         } else if (e->type() == QEvent::DragEnter || e->type() == QEvent::DragMove) {
             auto *d = static_cast<QDropEvent *>(e);
-            if (d->source() == m_table) {
+            if (d->source() == m_table || d->mimeData()->hasFormat("application/x-pxs-preset") || d->mimeData()->hasFormat("application/x-pxs-timeline")) {
                 const int y = d->position().toPoint().y();
                 const int over = m_table->rowAt(y);
                 int lineY = 0;
@@ -508,7 +527,7 @@ bool SequenceView::eventFilter(QObject *o, QEvent *e)
         } else if (e->type() == QEvent::Drop) {
             if (m_dropLine) m_dropLine->hide();
             auto *d = static_cast<QDropEvent *>(e);
-            if (d->source() == m_table) {
+            if (d->source() == m_table || d->mimeData()->hasFormat("application/x-pxs-preset") || d->mimeData()->hasFormat("application/x-pxs-timeline")) {
                 const int y = d->position().toPoint().y();
                 const int over = m_table->rowAt(y);
                 int target = 0;
@@ -518,6 +537,26 @@ bool SequenceView::eventFilter(QObject *o, QEvent *e)
                     const int rowTop = m_table->rowViewportPosition(over);
                     const int rowHeight = m_table->rowHeight(over);
                     target = y < rowTop + rowHeight / 2 ? over : over + 1;
+                }
+                if (d->source() != m_table) {
+                    Sequencer::Step step;
+                    const auto *mime = d->mimeData();
+                    step.preset = mime->data("application/x-pxs-preset").toULongLong();
+                    step.timeline = mime->data("application/x-pxs-timeline").toULongLong();
+                    if (step.preset && m_host) {
+                        if (const auto *preset = m_host->preset(step.preset)) step.description = QString::fromStdString(preset->name);
+                        else return true;
+                    } else if (step.timeline && m_host) {
+                        for (const auto &[id, name] : m_host->timelines())
+                            if (id == step.timeline) step.description = name;
+                        if (step.description.isEmpty()) return true;
+                    } else return true;
+                    auto after = sequence();
+                    after.steps.insert(after.steps.begin() + target, step);
+                    apply(after, QStringLiteral("Insert Step"));
+                    m_table->selectRow(target);
+                    d->acceptProposedAction();
+                    return true;
                 }
                 const int fromRow = m_table->currentRow();
                 if (fromRow >= 0 && fromRow < m_table->rowCount() && target != fromRow && target != fromRow + 1) {

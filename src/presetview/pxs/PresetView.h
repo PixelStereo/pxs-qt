@@ -7,6 +7,7 @@
 
 #include <QWidget>
 
+#include <functional>
 #include <memory>
 #include <string>
 #include <utility>
@@ -14,6 +15,7 @@
 
 class QComboBox;
 class QLabel;
+class QDoubleSpinBox;
 class QLineEdit;
 class QListWidget;
 class QPushButton;
@@ -35,6 +37,10 @@ public:
     }
 };
 
+void addParameterEditors(QTreeWidget &tree, QTreeWidgetItem &item, const std::string &path,
+                         const pxs::core::tree::Preset &base, pxs::core::tree::Preset &edits,
+                         double fadeOverride, bool step, const std::function<void()> &changed);
+
 class PresetView : public QWidget
 {
     Q_OBJECT
@@ -43,6 +49,7 @@ public:
     ~PresetView() override;
 
     const std::vector<pxs::core::tree::Preset> &presets() const { return m_presets; }
+    void setRecaller(std::function<void(int)> recall) { m_recall = std::move(recall); }
     void setPresets(const std::vector<pxs::core::tree::Preset> &presets);
 
     int currentPresetIndex() const;
@@ -69,6 +76,8 @@ private:
     PresetHost *m_host;
     std::vector<pxs::core::tree::Preset> m_presets;
 
+    std::function<void(int)> m_recall;
+    QDoubleSpinBox *m_fade;
     QComboBox *m_scopeCombo;
     QPushButton *m_captureBtn;
     QPushButton *m_deleteBtn;

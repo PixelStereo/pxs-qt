@@ -74,6 +74,7 @@ public:
         StepContinue next = StepContinue::Wait;
         quint64 runtimeId = 0; // stable across edits; assigned by Sequencer, not serialized
         quint64 preset = 0;
+        pxs::core::tree::Preset presetOverrides;
         quint64 sequence = 0; // starts this sequence from its first step; stable identity across edits/save/load
         std::vector<Step> actions; // optional flat group of steps, on this one's GO, each with its own waits inside it
         bool open = true;     // a group: its steps shown in the list (nothing else depends on it)

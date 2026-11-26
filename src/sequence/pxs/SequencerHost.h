@@ -5,6 +5,7 @@
 // those answers as they are: no index, no duration, nothing recalled.
 #include "Anim.h"
 #include <pxs/BeatClock.h>
+#include <pxs/core/tree/preset.h>
 
 #include <QJsonObject>
 #include <QtGlobal>
@@ -25,6 +26,8 @@ public:
     virtual int indexOfPreset(quint64) const { return -1; }
     virtual void recallPreset(int, double) {}
     virtual double presetDuration(quint64, double) const { return 0; }
+    virtual void recallPreset(int index, double fade, const pxs::core::tree::Preset &) { recallPreset(index, fade); }
+    virtual double presetDuration(quint64 id, double fade, const pxs::core::tree::Preset &) const { return presetDuration(id, fade); }
     // Every recall on its way at its end now (fades, delayed values), not the timelines
     virtual void finishRecalls() {}
 

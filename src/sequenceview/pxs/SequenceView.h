@@ -18,6 +18,7 @@ class QLabel;
 class QPushButton;
 class QTableWidget;
 class QUndoStack;
+class QListWidget;
 
 namespace pxs::sequenceview {
 
@@ -30,6 +31,7 @@ public:
     virtual std::vector<std::pair<quint64, QString>> timelines() const = 0;
     // The timeline a new step drives (the one the application shows)
     virtual quint64 currentTimeline() const { return 0; }
+    virtual const pxs::core::tree::Preset *preset(quint64) const { return nullptr; }
     // Stop all: every wait and follow, and what the application stops with them (its timelines)
     virtual void stopAll(Sequencer &sequencer) { sequencer.stopAll(); }
 };
@@ -53,7 +55,8 @@ class SequenceView : public QWidget
 public:
     SequenceView(Sequencer &sequencer, SequenceViewHost *host, QUndoStack *undo, QWidget *parent = nullptr);
 
-    void rebuild(); // the rows again: the steps, and the timelines they can drive (call it when those change)
+    void rebuild();
+    void inspectStep(int row); // the rows again: the steps, and the timelines they can drive (call it when those change)
 
     // The time of a step as the list shows it: 2.5 under a minute, 1:05.0 beyond, ∞ endless
     static QString seconds(double t);
@@ -63,7 +66,6 @@ private:
     void refresh();      // the step played, the one on standby, the times of the steps on their way
     void store();        // the rows, as edited, to the sequence (an undo step)
     void apply(const Sequencer::Sequence &after, const QString &text);
-    void move(int by);   // the selected step up or down
     bool typing() const; // a step being edited: Space and Escape are not GO and Stop all
 
 protected:

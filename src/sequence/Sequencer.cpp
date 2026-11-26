@@ -499,7 +499,7 @@ void Sequencer::playAtOnce(const std::vector<Step> &steps)
         }
         const int index = st.preset ? m_engine.indexOfPreset(st.preset) : m_engine.indexOfSnapshot(st.snapshot);
         if (index < 0) continue;
-        if (st.preset) m_engine.recallPreset(index, st.fadeOverride);
+        if (st.preset) m_engine.recallPreset(index, st.fadeOverride, st.presetOverrides);
         else m_engine.recallSnapshot(index, st.fadeOverride);
         m_engine.finishRecalls();
     }
@@ -1034,7 +1034,7 @@ void Sequencer::advance(double dt)
                 std::function<void(int, double)> recaller;
                 { QMutexLocker lk(&m_mutex); recaller = m_presetRecaller; }
                 if (QThread::currentThread() == thread() && recaller) recaller(index, st.fadeOverride);
-                else m_engine.recallPreset(index, st.fadeOverride);
+                else m_engine.recallPreset(index, st.fadeOverride, st.presetOverrides);
                 continue;
             }
             if (st.timeline) {
@@ -1098,6 +1098,8 @@ QJsonObject Sequencer::stepToJson(const Step &st)
     if (!st.description.isEmpty())
         o["description"] = st.description;
     if (st.fadeOverride >= 0 && (st.snapshot || st.preset)) o["fade_override"] = st.fadeOverride;
+    if (st.preset && (!st.presetOverrides.isEmpty() || !st.presetOverrides.times.empty() || !st.presetOverrides.delays.empty()))
+        o["preset_overrides"] = QString::fromStdString(st.presetOverrides.toJson());
     if (st.preWait > 0)
         o["pre_wait"] = st.preWait;
     if (st.postWait > 0)
@@ -1149,6 +1151,7 @@ Sequencer::Step Sequencer::stepFromJson(const QJsonObject &so)
     }
     st.description = so.value("description").toString();
     st.fadeOverride = std::clamp(so.value("fade_override").toDouble(-1), -1.0, 3600.0);
+    st.presetOverrides = pxs::core::tree::Preset::fromJson(so.value("preset_overrides").toString().toStdString());
     st.preWait = std::clamp(so.value("pre_wait").toDouble(0), 0.0, 3600.0);
     st.postWait = std::clamp(so.value("post_wait").toDouble(0), 0.0, 3600.0);
     st.quantize = std::clamp(so.value("quantize").toDouble(0), 0.0, 64.0);
@@ -1278,7 +1281,7 @@ double Sequencer::stepDuration(const Step &st, double unit) const
         return duration;
     }
     if (st.sequence) return 0; // starts an independent sequence, which owns its waits and follows
-    if (st.preset) return m_engine.presetDuration(st.preset, st.fadeOverride);
+    if (st.preset) return m_engine.presetDuration(st.preset, st.fadeOverride, st.presetOverrides);
     if (!st.timeline) return m_engine.snapshotDuration(st.snapshot, st.fadeOverride);
     return st.action == AnimAction::Play ? m_engine.animationPlayTime(st.timeline) : 0;
 }
