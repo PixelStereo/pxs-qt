@@ -8,6 +8,7 @@
 #include <QHostInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QNetworkInterface>
 
 #include <algorithm>
 #include <cmath>
@@ -90,9 +91,10 @@ void Devices::startDiscovery()
 
 void Devices::found(const pxs::oscquery::Device &device)
 {
-    // Not the application itself: its own name, or its own port on this computer
+    // Not the application itself: its own name, or its own port on one of this computer's addresses (a loopback, or one the
+    // interfaces hold). A host name that starts like this one's is not enough: "studio" also starts "studio-rehearsal".
     if (device.name == m_selfName ||
-        (m_selfPort && device.port == m_selfPort && (device.address.isLoopback() || QHostInfo::localHostName().startsWith(device.host.section('.', 0, 0)))))
+        (m_selfPort && device.port == m_selfPort && (device.address.isLoopback() || QNetworkInterface::allAddresses().contains(device.address))))
         return;
     const QString host = device.address.isNull() ? device.host : device.address.toString();
     for (const Device *d : m_registry.all())
