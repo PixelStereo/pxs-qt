@@ -1,5 +1,7 @@
 #include "pxs/SequenceView.h"
 
+#include <QDropEvent>
+
 #include <QApplication>
 #include <QComboBox>
 #include <QDoubleSpinBox>
@@ -183,7 +185,39 @@ SequenceView::SequenceView(Sequencer &sequencer, SequenceViewHost *host, QUndoSt
     top->addWidget(stopAll);
     outer->addLayout(top);
 
-    m_table = new QTableWidget(0, ColumnCount);
+    class StepTable : public QTableWidget
+    {
+    public:
+        std::function<void(int from, int to)> onDrop;
+        using QTableWidget::QTableWidget;
+
+    protected:
+        void dropEvent(QDropEvent *event) override
+        {
+            if (event->source() != this || !onDrop) {
+                QTableWidget::dropEvent(event);
+                return;
+            }
+            const int from = currentRow();
+            const QModelIndex idx = indexAt(event->position().toPoint());
+            int to = idx.isValid() ? idx.row() : rowCount() - 1;
+            event->ignore();
+            if (from >= 0 && to >= 0 && from != to) onDrop(from, to);
+        }
+    };
+
+    auto *table = new StepTable(0, ColumnCount);
+    table->onDrop = [this](int from, int to) {
+        Sequencer::Sequence s = sequence();
+        if (from < 0 || to < 0 || from >= int(s.steps.size()) || to >= int(s.steps.size()) || from == to) return;
+        if (from < to)
+            std::rotate(s.steps.begin() + from, s.steps.begin() + from + 1, s.steps.begin() + to + 1);
+        else
+            std::rotate(s.steps.begin() + to, s.steps.begin() + from, s.steps.begin() + from + 1);
+        apply(s, QStringLiteral("Move Step"));
+        m_table->selectRow(to);
+    };
+    m_table = table;
     m_table->setItemDelegate(new StepDelegate(m_table));
     m_table->setHorizontalHeaderLabels({QStringLiteral("Step"), QStringLiteral("Pre-wait"), QStringLiteral("Does"), QStringLiteral("Timeline"),
                                         QStringLiteral("Value"), QStringLiteral("Post-wait"), QStringLiteral("Then")});
@@ -198,6 +232,10 @@ SequenceView::SequenceView(Sequencer &sequencer, SequenceViewHost *host, QUndoSt
     m_table->verticalHeader()->setToolTip(QStringLiteral("Double-click: play this step"));
     m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_table->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_table->setDragEnabled(true);
+    m_table->setAcceptDrops(true);
+    m_table->setDragDropMode(QAbstractItemView::InternalMove);
+    m_table->setDropIndicatorShown(true);
     outer->addWidget(m_table, 1);
 
     auto *bottom = new QHBoxLayout;
