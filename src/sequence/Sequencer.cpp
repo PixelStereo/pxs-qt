@@ -1098,7 +1098,7 @@ QJsonObject Sequencer::stepToJson(const Step &st)
     if (!st.description.isEmpty())
         o["description"] = st.description;
     if (st.fadeOverride >= 0 && (st.snapshot || st.preset)) o["fade_override"] = st.fadeOverride;
-    if (st.preset && (!st.presetOverrides.isEmpty() || !st.presetOverrides.times.empty() || !st.presetOverrides.delays.empty()))
+    if (st.preset && (!st.presetOverrides.isEmpty() || !st.presetOverrides.times.empty() || !st.presetOverrides.delays.empty() || !st.presetOverrides.curves.empty()))
         o["preset_overrides"] = QString::fromStdString(st.presetOverrides.toJson());
     if (st.preWait > 0)
         o["pre_wait"] = st.preWait;

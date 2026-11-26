@@ -4,6 +4,7 @@
 #include <QDoubleSpinBox>
 #include <QMimeData>
 #include <QRandomGenerator>
+#include <QTimer>
 #include <QSignalBlocker>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -81,22 +82,19 @@ void addParameterEditors(QTreeWidget &tree, QTreeWidgetItem &item, const std::st
                          double fadeOverride, bool step, const std::function<void()> &changed)
 {
     const bool group = !base.values.count(path);
-    auto sample = base;
-    if (group) sample.values[path] = "[]";
-    const auto effective = sample.resolved(step ? edits : pxs::core::tree::Preset{}, fadeOverride);
     for (int column = group ? 2 : 1; column <= 3; ++column) {
         auto *edit = new QLineEdit;
         auto &numbers = column == 2 ? edits.times : edits.delays;
-        const auto &effectiveNumbers = column == 2 ? effective.times : effective.delays;
+        const double inherited = column == 2 ? base.timeAt(path, fadeOverride) : base.delayAt(path);
         const auto value = edits.values.find(path);
         const auto number = numbers.find(path);
         if (column == 1) {
             edit->setText(value == edits.values.end() ? QString() : QString::fromStdString(value->second));
-            edit->setPlaceholderText(QString::fromStdString(effective.values.at(path)));
+            edit->setPlaceholderText(QString::fromStdString(base.values.at(path)));
             edit->setToolTip(QStringLiteral("OSCQuery value as JSON arguments. Clear to inherit in a step."));
         } else {
             if (number != numbers.end()) edit->setText(QString::number(number->second));
-            edit->setPlaceholderText(QStringLiteral("%1 · inherited").arg(effectiveNumbers.at(path)));
+            edit->setPlaceholderText(QStringLiteral("%1 · inherited").arg(inherited));
             edit->setToolTip(QStringLiteral("Seconds. Clear to inherit; zero is explicit."));
         }
         tree.setItemWidget(&item, column, edit);
@@ -121,6 +119,18 @@ void addParameterEditors(QTreeWidget &tree, QTreeWidgetItem &item, const std::st
             changed();
         });
     }
+    auto *curve = new QComboBox;
+    const QStringList curves{QStringLiteral("Linear"), QStringLiteral("Ease in"), QStringLiteral("Ease out"),
+                             QStringLiteral("Ease in/out"), QStringLiteral("Cubic in"), QStringLiteral("Cubic out")};
+    curve->addItem(QStringLiteral("Inherited · %1").arg(curves.value(base.curveAt(path))));
+    curve->addItems(curves);
+    if (const auto found = edits.curves.find(path); found != edits.curves.end()) curve->setCurrentIndex(found->second + 1);
+    tree.setItemWidget(&item, 4, curve);
+    QObject::connect(curve, &QComboBox::currentIndexChanged, curve, [path, &edits, changed](int index) {
+        if (index <= 0) edits.curves.erase(path);
+        else edits.curves[path] = index - 1;
+        changed();
+    });
 }
 
 PresetView::PresetView(pxs::core::tree::Tree &tree, QUndoStack *undo, PresetHost *host, QWidget *parent)
@@ -166,6 +176,13 @@ PresetView::PresetView(pxs::core::tree::Tree &tree, QUndoStack *undo, PresetHost
     leftLayout->addLayout(leftToolbar);
 
     m_presetList = new PresetList;
+    auto *timer = new QTimer(this);
+    timer->setInterval(16);
+    connect(timer, &QTimer::timeout, this, [this, timer] {
+        m_playback.advance(m_tree, m_recallClock.restart() / 1000.0);
+        if (!m_playback.active()) timer->stop();
+    });
+    m_playbackTimer = timer;
     m_presetList->setDragDropMode(QAbstractItemView::DragOnly);
     m_presetList->setSelectionMode(QAbstractItemView::SingleSelection);
     leftLayout->addWidget(m_presetList, 1);
@@ -213,7 +230,7 @@ PresetView::PresetView(pxs::core::tree::Tree &tree, QUndoStack *undo, PresetHost
     rightLayout->addLayout(timingHeader);
 
     m_paramsTree = new QTreeWidget;
-    m_paramsTree->setHeaderLabels({QStringLiteral("Parameter"), QStringLiteral("Value"), QStringLiteral("Time (s)"), QStringLiteral("Delay (s)")});
+    m_paramsTree->setHeaderLabels({QStringLiteral("Parameter"), QStringLiteral("Value"), QStringLiteral("Time (s)"), QStringLiteral("Delay (s)"), QStringLiteral("Curve")});
     m_paramsTree->header()->setSectionResizeMode(0, QHeaderView::Stretch);
     m_paramsTree->header()->setSectionResizeMode(1, QHeaderView::Interactive);
     for (int i = 1; i <= 3; ++i) m_paramsTree->header()->resizeSection(i, 72);
@@ -426,8 +443,12 @@ bool PresetView::recallPreset(int index)
         m_recall(index);
         m_statusLabel->setText(QStringLiteral("Recall: %1").arg(name));
     } else {
-        const auto res = pxs::core::tree::recall(m_tree, p);
-        m_statusLabel->setText(QStringLiteral("%1 values applied").arg(res.applied));
+        m_playback.start(m_tree, p);
+        if (m_playback.active() && !m_playbackTimer->isActive()) {
+            m_recallClock.start();
+            m_playbackTimer->start();
+        }
+        m_statusLabel->setText(QStringLiteral("Recall: %1").arg(name));
     }
     emit presetRecalled(index, name);
     return true;
@@ -437,7 +458,7 @@ void PresetView::showPresetDetails(int index)
 {
     m_updatingTree = true;
     m_paramsTree->clear();
-    m_paramsTree->setHeaderLabels({QStringLiteral("Parameter"), QStringLiteral("Value"), QStringLiteral("Time (s)"), QStringLiteral("Delay (s)")});
+    m_paramsTree->setHeaderLabels({QStringLiteral("Parameter"), QStringLiteral("Value"), QStringLiteral("Time (s)"), QStringLiteral("Delay (s)"), QStringLiteral("Curve")});
     m_fade->setEnabled(index >= 0 && index < int(m_presets.size()));
     if (index < 0 || index >= int(m_presets.size())) {
         m_nameEdit->setEnabled(false);

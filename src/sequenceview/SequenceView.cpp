@@ -504,9 +504,9 @@ QWidget *SequenceView::stepInspector(int row, QWidget *parent)
         fade->setPlaceholderText(QStringLiteral("%1 · inherited").arg(preset.fade));
         form->addRow(QStringLiteral("Default fade (s)"), fade);
         auto *tree = new QTreeWidget;
-        tree->setHeaderLabels({QStringLiteral("Parameter"), QStringLiteral("Value"), QStringLiteral("Time (s)"), QStringLiteral("Delay (s)")});
+        tree->setHeaderLabels({QStringLiteral("Parameter"), QStringLiteral("Value"), QStringLiteral("Time (s)"), QStringLiteral("Delay (s)"), QStringLiteral("Curve")});
         tree->header()->setSectionResizeMode(0, QHeaderView::Stretch);
-        for (int i = 1; i <= 3; ++i) tree->header()->resizeSection(i, 72);
+        for (int i = 1; i <= 4; ++i) tree->header()->resizeSection(i, 72);
         auto *duration = new QLabel;
         const auto update = [step, preset, fade, duration] {
             bool ok = false;

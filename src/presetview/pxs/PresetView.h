@@ -6,6 +6,7 @@
 #include <pxs/core/tree/tree.h>
 
 #include <QWidget>
+#include <QElapsedTimer>
 
 #include <functional>
 #include <memory>
@@ -14,6 +15,7 @@
 #include <vector>
 
 class QComboBox;
+class QTimer;
 class QLabel;
 class QDoubleSpinBox;
 class QLineEdit;
@@ -79,6 +81,9 @@ private:
     std::vector<pxs::core::tree::Preset> m_presets;
 
     std::function<void(int)> m_recall;
+    pxs::core::tree::PresetPlayback m_playback;
+    QElapsedTimer m_recallClock;
+    QTimer *m_playbackTimer;
     QWidget *m_inspector;
     QDoubleSpinBox *m_fade;
     QComboBox *m_scopeCombo;
