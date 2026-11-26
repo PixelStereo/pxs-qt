@@ -68,7 +68,7 @@ void collectHoldablePaths(const pxs::core::tree::Node &n, const std::string &pre
 {
     if (n.kind() == pxs::core::tree::Kind::Parameter && n.access == 3 && n.get && n.set) {
         if (!n.parameter() || n.parameter()->isStored()) {
-            if (prefix.empty() || n.path().rfind(prefix, 0) == 0) out.push_back(n.path());
+            if (prefix.empty() || n.path() == prefix || n.path().rfind(prefix + "/", 0) == 0) out.push_back(n.path());
         }
     }
     for (const auto &c : n.children()) collectHoldablePaths(*c.second, prefix, out);
@@ -168,7 +168,7 @@ PresetView::PresetView(pxs::core::tree::Tree &tree, QUndoStack *undo, PresetHost
     splitter->addWidget(leftWidget);
 
     // ================= Right Pane (Preset & Scope Inspector) =================
-    auto *rightWidget = new QWidget(splitter);
+    auto *rightWidget = m_inspector = new QWidget(splitter);
     auto *rightLayout = new QVBoxLayout(rightWidget);
     rightLayout->setContentsMargins(0, 0, 0, 0);
     rightLayout->setSpacing(6);
@@ -184,32 +184,34 @@ PresetView::PresetView(pxs::core::tree::Tree &tree, QUndoStack *undo, PresetHost
 
     m_recallBtn = new QPushButton(QStringLiteral("▶ Recall (GO)"));
     m_recallBtn->setObjectName(QStringLiteral("go"));
-    m_recallBtn->setStyleSheet(QStringLiteral("QPushButton { color: #4cd964; font-weight: bold; }"));
     m_recallBtn->setToolTip(QStringLiteral("Recall this preset onto the tree"));
     m_recallBtn->setEnabled(false);
 
     rightHeader->addWidget(m_nameEdit, 1);
     rightHeader->addWidget(m_updateBtn);
+    rightLayout->addLayout(rightHeader);
+    auto *timingHeader = new QHBoxLayout;
     m_fade = new QDoubleSpinBox;
     m_fade->setRange(0, 3600);
     m_fade->setDecimals(3);
     m_fade->setSuffix(QStringLiteral(" s"));
-    rightHeader->addWidget(new QLabel(QStringLiteral("Fade")));
-    rightHeader->addWidget(m_fade);
+    timingHeader->addWidget(new QLabel(QStringLiteral("Fade")));
+    timingHeader->addWidget(m_fade);
+    timingHeader->addStretch();
     connect(m_fade, &QDoubleSpinBox::editingFinished, this, [this] {
         const int row = currentPresetIndex();
         if (row < 0 || row >= int(m_presets.size()) || m_presets[row].fade == m_fade->value()) return;
         m_presets[row].fade = m_fade->value();
         emit presetsChanged();
     });
-    rightHeader->addWidget(m_recallBtn);
-    rightLayout->addLayout(rightHeader);
+    timingHeader->addWidget(m_recallBtn);
+    rightLayout->addLayout(timingHeader);
 
     m_paramsTree = new QTreeWidget;
-    m_paramsTree->setHeaderLabels({QStringLiteral("Parameter (Scope)"), QStringLiteral("Captured Value")});
+    m_paramsTree->setHeaderLabels({QStringLiteral("Parameter"), QStringLiteral("Value"), QStringLiteral("Time (s)"), QStringLiteral("Delay (s)")});
     m_paramsTree->header()->setSectionResizeMode(0, QHeaderView::Stretch);
     m_paramsTree->header()->setSectionResizeMode(1, QHeaderView::Interactive);
-    m_paramsTree->header()->resizeSection(1, 140);
+    for (int i = 1; i <= 3; ++i) m_paramsTree->header()->resizeSection(i, 72);
     rightLayout->addWidget(m_paramsTree, 1);
 
     auto *bottomRight = new QHBoxLayout;
@@ -281,6 +283,7 @@ PresetView::PresetView(pxs::core::tree::Tree &tree, QUndoStack *undo, PresetHost
     });
 
     connect(m_presetList, &QListWidget::currentRowChanged, this, [this](int row) { showPresetDetails(row); });
+    connect(m_presetList, &QListWidget::itemClicked, this, [this] { emit presetSelected(); });
     connect(m_presetList, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem *) {
         recallPreset(m_presetList->currentRow());
     });
@@ -406,6 +409,7 @@ void PresetView::captureCurrent(const QString &customName)
     selectPreset(int(m_presets.size()) - 1);
     m_statusLabel->setText(QStringLiteral("Preset '%1' capturé (%2 paramètres)").arg(name).arg(p.values.size()));
     emit presetsChanged();
+    emit presetSelected();
 }
 
 bool PresetView::recallPreset(int index)

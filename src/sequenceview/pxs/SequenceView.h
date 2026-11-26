@@ -56,7 +56,9 @@ public:
     SequenceView(Sequencer &sequencer, SequenceViewHost *host, QUndoStack *undo, QWidget *parent = nullptr);
 
     void rebuild();
-    void inspectStep(int row); // the rows again: the steps, and the timelines they can drive (call it when those change)
+    void inspectStep(int row);
+    QWidget *stepInspector(int row, QWidget *parent);
+    void setInspectorSink(std::function<void(QWidget *)> sink) { m_inspectorSink = std::move(sink); } // the rows again: the steps, and the timelines they can drive (call it when those change)
 
     // The time of a step as the list shows it: 2.5 under a minute, 1:05.0 beyond, ∞ endless
     static QString seconds(double t);
@@ -79,6 +81,7 @@ private:
     QFrame *m_dropLine = nullptr;
     QPushButton *m_go;
     QLabel *m_next, *m_state;
+    std::function<void(QWidget *)> m_inspectorSink;
     bool m_filling = false;
 };
 

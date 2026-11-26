@@ -1,7 +1,7 @@
 #include "pxs/SequenceView.h"
 #include <pxs/PresetView.h>
 #include <QDialog>
-#include <QDialogButtonBox>
+#include <QFormLayout>
 #include <QMimeData>
 #include <QTreeWidget>
 
@@ -294,6 +294,9 @@ SequenceView::SequenceView(Sequencer &sequencer, SequenceViewHost *host, QUndoSt
         if (!m_filling) QTimer::singleShot(0, this, [this] { store(); }); // not from inside the item's own change
     });
 
+    connect(m_table, &QTableWidget::cellClicked, this, [this](int row, int) {
+        if (m_inspectorSink) m_inspectorSink(stepInspector(row, nullptr));
+    });
     connect(&m_seq, &Sequencer::changed, this, [this] { rebuild(); });
     connect(&m_seq, &Sequencer::positionChanged, this, [this] { refresh(); });
     auto *poll = new QTimer(this); // the steps on their way
@@ -450,50 +453,100 @@ void SetSequence::undo() { m_seq.setSequence(m_index, m_before); }
 
 void SequenceView::inspectStep(int row)
 {
-    auto edited = sequence();
-    if (row < 0 || row >= int(edited.steps.size())) return;
-    auto &step = edited.steps[size_t(row)];
-    const auto *source = step.preset && m_host ? m_host->preset(step.preset) : nullptr;
+    if (m_inspectorSink) {
+        m_inspectorSink(stepInspector(row, nullptr));
+        return;
+    }
     QDialog dialog(this);
-    dialog.setWindowTitle(QStringLiteral("Step · %1").arg(step.description));
+    dialog.setWindowTitle(QStringLiteral("Inspect Step"));
     auto *layout = new QVBoxLayout(&dialog);
+    layout->addWidget(stepInspector(row, &dialog));
+    dialog.resize(680, 440);
+    dialog.exec();
+}
+
+QWidget *SequenceView::stepInspector(int row, QWidget *parent)
+{
+    auto *panel = new QWidget(parent);
+    auto *layout = new QVBoxLayout(panel);
+    const auto current = sequence();
+    if (row < 0 || row >= int(current.steps.size())) return panel;
+    auto step = std::make_shared<Sequencer::Step>(current.steps[row]);
+    auto *form = new QFormLayout;
+    layout->addLayout(form);
+    auto *description = new QLineEdit(step->description);
+    form->addRow(QStringLiteral("Step"), description);
+    const auto waitField = [form](const QString &label, double value) {
+        auto *field = new QDoubleSpinBox;
+        field->setDecimals(3);
+        field->setRange(0, 3600);
+        field->setValue(value);
+        form->addRow(label, field);
+        return field;
+    };
+    const auto unit = current.beats ? QStringLiteral(" (beats)") : QStringLiteral(" (s)");
+    auto *pre = waitField(QStringLiteral("Pre-wait") + unit, step->preWait);
+    auto *post = waitField(QStringLiteral("Post-wait") + unit, step->postWait);
+    auto *follow = new QComboBox;
+    follow->addItems({QStringLiteral("GO"), QStringLiteral("AUTO")});
+    follow->setCurrentIndex(step->next == Sequencer::StepContinue::AutoFollow ? 1 : 0);
+    form->addRow(QStringLiteral("Next"), follow);
+    post->setEnabled(follow->currentIndex() == 1);
+    connect(follow, &QComboBox::currentIndexChanged, post, [post](int index) { post->setEnabled(index == 1); });
+
+    const auto *source = step->preset && m_host ? m_host->preset(step->preset) : nullptr;
     if (source) {
         const auto preset = *source;
-        auto *fade = new QLineEdit(step.fadeOverride < 0 ? QString() : QString::number(step.fadeOverride));
-        fade->setPlaceholderText(QStringLiteral("%1 s · inherited").arg(preset.fade));
-        layout->addWidget(new QLabel(QStringLiteral("Default fade override (s)")));
-        layout->addWidget(fade);
+        form->addRow(QStringLiteral("Preset"), new QLabel(QString::fromStdString(preset.name)));
+        auto *fade = new QLineEdit(step->fadeOverride < 0 ? QString() : QString::number(step->fadeOverride));
+        fade->setPlaceholderText(QStringLiteral("%1 · inherited").arg(preset.fade));
+        form->addRow(QStringLiteral("Default fade (s)"), fade);
         auto *tree = new QTreeWidget;
         tree->setHeaderLabels({QStringLiteral("Parameter"), QStringLiteral("Value"), QStringLiteral("Time (s)"), QStringLiteral("Delay (s)")});
+        tree->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+        for (int i = 1; i <= 3; ++i) tree->header()->resizeSection(i, 72);
         auto *duration = new QLabel;
-        const auto update = [&] {
+        const auto update = [step, preset, fade, duration] {
             bool ok = false;
             const auto seconds = fade->text().toDouble(&ok);
-            step.fadeOverride = ok && seconds >= 0 && seconds <= 3600 ? seconds : -1;
-            duration->setText(QStringLiteral("Effective duration: %1 s").arg(preset.resolved(step.presetOverrides, step.fadeOverride).duration()));
+            step->fadeOverride = ok && seconds >= 0 && seconds <= 3600 ? seconds : -1;
+            duration->setText(QStringLiteral("Effective duration: %1 s").arg(preset.resolved(step->presetOverrides, step->fadeOverride).duration()));
         };
-        const auto populate = [&] {
+        const auto populate = [step, preset, tree, update] {
             tree->clear();
             for (const auto &[path, value] : preset.values) {
                 auto *item = new QTreeWidgetItem(tree, {QString::fromStdString(path)});
-                pxs::presetview::addParameterEditors(*tree, *item, path, preset, step.presetOverrides, step.fadeOverride, true, update);
+                pxs::presetview::addParameterEditors(*tree, *item, path, preset, step->presetOverrides, step->fadeOverride, true, update);
             }
         };
         populate();
-        QObject::connect(fade, &QLineEdit::editingFinished, &dialog, [&] { update(); populate(); });
-        layout->addWidget(tree);
+        connect(fade, &QLineEdit::editingFinished, panel, [update, populate] { update(); populate(); });
+        layout->addWidget(tree, 1);
         layout->addWidget(duration);
         update();
-        auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
-        layout->addWidget(buttons);
-        connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
-        connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
-        dialog.resize(700, 360);
-        if (dialog.exec() == QDialog::Accepted) apply(edited, QStringLiteral("Edit preset overrides"));
-        return;
+    } else {
+        layout->addStretch(1);
     }
-    layout->addWidget(new QLabel(QStringLiteral("Pre-wait: %1 s · Post-wait: %2 s").arg(step.preWait).arg(step.postWait)));
-    dialog.exec();
+    auto *save = new QPushButton(QStringLiteral("Apply to Step"));
+    layout->addWidget(save);
+    const int sequenceIndex = m_seq.current();
+    connect(save, &QPushButton::clicked, panel, [this, step, description, pre, post, follow, sequenceIndex] {
+        if (sequenceIndex != m_seq.current()) return;
+        auto after = sequence();
+        const auto found = std::find_if(after.steps.begin(), after.steps.end(), [step](const auto &item) { return item.runtimeId == step->runtimeId; });
+        if (found == after.steps.end()) return;
+        found->description = description->text();
+        found->preWait = pre->value();
+        found->postWait = post->value();
+        found->next = follow->currentIndex() ? Sequencer::StepContinue::AutoFollow : Sequencer::StepContinue::Wait;
+        if (found->preset == step->preset) {
+            found->fadeOverride = step->fadeOverride;
+            found->presetOverrides = step->presetOverrides;
+        }
+        apply(after, QStringLiteral("Edit Step"));
+        m_table->selectRow(int(found - after.steps.begin()));
+    });
+    return panel;
 }
 
 bool SequenceView::eventFilter(QObject *o, QEvent *e)

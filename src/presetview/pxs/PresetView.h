@@ -51,6 +51,7 @@ public:
     const std::vector<pxs::core::tree::Preset> &presets() const { return m_presets; }
     void setRecaller(std::function<void(int)> recall) { m_recall = std::move(recall); }
     void rebuildScopes();
+    QWidget *inspector() const { return m_inspector; }
     void setPresets(const std::vector<pxs::core::tree::Preset> &presets);
 
     int currentPresetIndex() const;
@@ -63,6 +64,7 @@ public:
 
 signals:
     void presetsChanged();
+    void presetSelected();
     void presetRecalled(int index, const QString &name);
 
 private:
@@ -77,6 +79,7 @@ private:
     std::vector<pxs::core::tree::Preset> m_presets;
 
     std::function<void(int)> m_recall;
+    QWidget *m_inspector;
     QDoubleSpinBox *m_fade;
     QComboBox *m_scopeCombo;
     QPushButton *m_captureBtn;
