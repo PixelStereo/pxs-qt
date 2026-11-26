@@ -6,6 +6,8 @@
 #include <OscCodec.h>
 
 #include <QApplication>
+#include <QCheckBox>
+#include <QLabel>
 #include <QElapsedTimer>
 #include <QFormLayout>
 #include <QLineEdit>
@@ -204,7 +206,13 @@ static void panel()
     panel.select(o);
     CHECK(panel.selected() == o && table && table->columnCount() == 4 && table->rowCount() == 1);
     panel.select(d);
-    CHECK(table && table->columnCount() == 5); // Address, Channel, 16 bits, Min, Max
+    CHECK(table && table->columnCount() == 4); // Address, Channel, 16 bits, Range
+    auto *range = table ? qobject_cast<QLabel *>(table->cellWidget(0, 3)) : nullptr;
+    auto *fine = table ? qobject_cast<QCheckBox *>(table->cellWidget(0, 2)) : nullptr;
+    CHECK(range && range->text() == QStringLiteral("0–255"));
+    CHECK(fine);
+    if (fine) fine->setChecked(true);
+    CHECK(range && range->text() == QStringLiteral("0–65535"));
 
     // An address renamed in the table is the device's
     if (table && table->item(0, 0)) table->item(0, 0)->setText(QStringLiteral("dimmer"));
