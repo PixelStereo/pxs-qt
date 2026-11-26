@@ -1156,7 +1156,7 @@ Sequencer::Step Sequencer::stepFromJson(const QJsonObject &so)
     st.postWait = std::clamp(so.value("post_wait").toDouble(0), 0.0, 3600.0);
     st.quantize = std::clamp(so.value("quantize").toDouble(0), 0.0, 64.0);
     const QString c = so.value("continue").toString();
-    st.next = c == "follow" || c == "auto_follow" ? StepContinue::AutoFollow : StepContinue::Wait;
+    st.next = c == "auto_follow" ? StepContinue::AutoFollow : StepContinue::Wait;
     const double at = so.value("at").toDouble(-1);
     st.at = std::isfinite(at) && at >= 0 ? at : -1;
     st.open = !so.value("closed").toBool();

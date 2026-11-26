@@ -117,14 +117,12 @@ static void dmxDevices()
     pan.path = "/pan";
     pan.channel = 2;
     pan.fine = true;
-    pan.min = -270;
-    pan.max = 270;
     spot.addresses = {dimmer, pan};
     const quint64 id = devices.add(spot);
     CHECK(devices.online(id));
     CHECK(devices.status(id) == QStringLiteral("Universe 2, channels 101–103"));
     CHECK(!devices.dmxLevel(id, "/dimmer"));
-    CHECK(devices.send(id, "/dimmer", 1) && devices.send(id, "/pan", 0));
+    CHECK(devices.send(id, "/dimmer", 255) && devices.send(id, "/pan", 32768));
     CHECK(devices.dmxLevel(id, "/dimmer") == 255 && devices.dmxLevel(id, "/pan") == 32768);
     const auto universes = devices.dmxUniverses();
     CHECK(universes.count(2) && universes.at(2).size() == 512);
@@ -133,9 +131,8 @@ static void dmxDevices()
         CHECK(quint8(u[100]) == 255 && quint8(u[101]) == 128 && quint8(u[102]) == 0 && quint8(u[99]) == 0);
     }
     CHECK(told == 2);
-    // A legacy 0–1 patch can still be used in native units by an explicitly routed timeline.
-    CHECK(devices.sendNative(id, "/dimmer", 1) && devices.dmxLevel(id, "/dimmer") == 1);
-    CHECK(devices.sendNative(id, "/dimmer", 255) && devices.dmxLevel(id, "/dimmer") == 255);
+    CHECK(devices.send(id, "/dimmer", 1) && devices.dmxLevel(id, "/dimmer") == 1);
+
 
     // Moved to another start address: what it took is let go
     Device moved = *devices.find(id);

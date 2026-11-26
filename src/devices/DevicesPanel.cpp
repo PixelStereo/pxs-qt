@@ -38,8 +38,8 @@ QStringList columns(Kind kind)
 {
     switch (kind) {
     case Kind::Osc: return {QStringLiteral("Address"), QStringLiteral("Type"), QStringLiteral("Min"), QStringLiteral("Max")};
-    case Kind::Dmx: return {QStringLiteral("Address"), QStringLiteral("Channel"), QStringLiteral("16 bits"), QStringLiteral("Input min"), QStringLiteral("Input max")};
-    case Kind::Midi: return {QStringLiteral("Address"), QStringLiteral("Message"), QStringLiteral("Number"), QStringLiteral("Input min"), QStringLiteral("Input max")};
+    case Kind::Dmx: return {QStringLiteral("Address"), QStringLiteral("Channel"), QStringLiteral("16 bits"), QStringLiteral("Range")};
+    case Kind::Midi: return {QStringLiteral("Address"), QStringLiteral("Message"), QStringLiteral("Number"), QStringLiteral("Range")};
     case Kind::OscQuery: break;
     }
     return {};
@@ -140,7 +140,6 @@ Device starter(Kind kind)
         break;
     case Kind::OscQuery: break;
     }
-    a.max = core::nativeMaximum(kind, a);
     if (!a.path.empty()) d.addresses.push_back(a);
     return d;
 }
@@ -285,7 +284,6 @@ DevicesPanel::DevicesPanel(Devices *devices, const QString &hint, QWidget *paren
         if (!d || d->kind == Kind::OscQuery) return;
         Device edited = *d;
         Address a;
-        a.max = core::nativeMaximum(d->kind, a);
         const int n = int(edited.addresses.size()) + 1;
         a.path = utf8(QStringLiteral("/value%1").arg(n));
         if (d->kind == Kind::Dmx) a.channel = std::min(512, std::max(1, d->footprint() + 1));
@@ -435,34 +433,11 @@ void DevicesPanel::fillTable()
             m_addresses->setCellWidget(row, c++, stored(messageBox(a.message)));
             m_addresses->setCellWidget(row, c++, stored(wholeBox(0, 127, a.number)));
         }
-        auto *minimum = numberBox(a.min);
-        auto *maximum = numberBox(a.max);
-        m_addresses->setCellWidget(row, c++, stored(minimum));
-        m_addresses->setCellWidget(row, c, stored(maximum));
-        if (d->kind == Kind::Dmx || d->kind == Kind::Midi) {
-            auto adjust = [minimum, maximum, kind = d->kind, previous = a](Address next) mutable {
-                if (minimum->value() == 0 && maximum->value() == core::nativeMaximum(kind, previous))
-                    maximum->setValue(core::nativeMaximum(kind, next));
-                previous = next;
-            };
-            // Run this before storing the new message type or bit depth.
-            QWidget *encoding = m_addresses->cellWidget(row, d->kind == Kind::Dmx ? 2 : 1);
-            disconnect(encoding, nullptr, this, nullptr);
-            if (auto *fine = qobject_cast<QCheckBox *>(encoding)) {
-                connect(fine, &QCheckBox::toggled, this, [this, adjust, a](bool on) mutable {
-                    auto next = a;
-                    next.fine = on;
-                    adjust(next);
-                    store();
-                });
-            } else if (auto *message = qobject_cast<QComboBox *>(encoding)) {
-                connect(message, &QComboBox::currentIndexChanged, this, [this, message, adjust, a]() mutable {
-                    auto next = a;
-                    next.message = pxs::core::midi::Kind(message->currentData().toInt());
-                    adjust(next);
-                    store();
-                });
-            }
+        if (d->kind == Kind::Osc) {
+            m_addresses->setCellWidget(row, c++, stored(numberBox(a.min)));
+            m_addresses->setCellWidget(row, c, stored(numberBox(a.max)));
+        } else {
+            m_addresses->setCellWidget(row, c, new QLabel(QStringLiteral("0–%1").arg(core::nativeMaximum(d->kind, a))));
         }
     }
     m_filling = was;
@@ -505,8 +480,12 @@ void DevicesPanel::store()
             if (auto *m = qobject_cast<QComboBox *>(m_addresses->cellWidget(row, c++))) a.message = pxs::core::midi::Kind(m->currentData().toInt());
             if (auto *n = qobject_cast<QSpinBox *>(m_addresses->cellWidget(row, c++))) a.number = n->value();
         }
-        if (auto *lo = qobject_cast<QDoubleSpinBox *>(m_addresses->cellWidget(row, c++))) a.min = lo->value();
-        if (auto *hi = qobject_cast<QDoubleSpinBox *>(m_addresses->cellWidget(row, c))) a.max = hi->value();
+        if (d->kind == Kind::Osc) {
+            if (auto *lo = qobject_cast<QDoubleSpinBox *>(m_addresses->cellWidget(row, c++))) a.min = lo->value();
+            if (auto *hi = qobject_cast<QDoubleSpinBox *>(m_addresses->cellWidget(row, c))) a.max = hi->value();
+        } else if (auto *label = qobject_cast<QLabel *>(m_addresses->cellWidget(row, c))) {
+            label->setText(QStringLiteral("0–%1").arg(core::nativeMaximum(d->kind, a)));
+        }
         edited.addresses.push_back(a);
     }
     if (edited == *d) return;
