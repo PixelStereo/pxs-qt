@@ -175,6 +175,18 @@ bool CurveLane::handleAt(QPointF p, int *key, bool *out) const
 
 void CurveLane::emitEdited(int gesture) { emit edited(m_track, gesture); }
 
+void CurveLane::setOverlays(std::vector<Overlay> overlays, bool selectOnClick)
+{
+    m_overlays = std::move(overlays);
+    m_selectOverlay = selectOnClick;
+    update();
+}
+
+double CurveLane::playedAt(double time) const
+{
+    return m_showPlayhead ? std::max(0.0, m_played + (m_backwards ? m_playhead - time : time - m_playhead)) : time;
+}
+
 void CurveLane::paintEvent(QPaintEvent *)
 {
     QPainter p(this);
@@ -202,24 +214,32 @@ void CurveLane::paintEvent(QPaintEvent *)
     // The values over one pass
     const AnimTrack drawn = shown();
     const bool any = m_track.oscillator || !m_track.keys.empty();
-    if (any) {
+    const auto drawCurve = [&](const AnimTrack &track, QColor color, double stroke) {
         QPainterPath path;
+        bool started = false;
         for (int x = int(x0); x <= int(std::ceil(x1)); ++x) {
-            const double t = tOf(x);
-            const double played = m_showPlayhead ? std::max(0.0, m_played + (m_backwards ? m_playhead - t : t - m_playhead)) : t;
-            const QPointF pt(x, yOf(drawn.valueAt(t, played)));
-            if (x == int(x0)) path.moveTo(pt);
-            else path.lineTo(pt);
+            const double time = tOf(x);
+            const double value = track.valueAt(time, playedAt(time));
+            if (!std::isfinite(value)) {
+                started = false;
+                continue;
+            }
+            const QPointF point(x, yOf(value));
+            if (started) path.lineTo(point);
+            else path.moveTo(point);
+            started = true;
         }
-        QColor c = m_track.oscillator ? kWave : kCurve;
-        if (!m_track.enabled) c.setAlphaF(0.35f);
+        if (!track.enabled) color.setAlphaF(color.alphaF() * 0.45f);
         p.save();
         p.setClipRect(QRectF(x0, 0, x1 - x0, height()));
-        p.setPen(QPen(c, 1.8));
+        p.setPen(QPen(color, stroke));
         p.setBrush(Qt::NoBrush);
         p.drawPath(path);
         p.restore();
-    } else {
+    };
+    for (const auto &overlay : m_overlays) drawCurve(overlay.track, overlay.color, 1.5);
+    if (any) drawCurve(drawn, m_track.oscillator ? kWave : kCurve, 1.8);
+    else if (m_overlays.empty()) {
         p.setPen(QColor(110, 110, 118));
         p.drawText(rect(), Qt::AlignCenter, QStringLiteral("Click to add a key · drag to draw a pattern"));
     }
@@ -287,7 +307,28 @@ void CurveLane::mousePressEvent(QMouseEvent *e)
         setCursor(Qt::ClosedHandCursor);
         return;
     }
-    if (e->button() != Qt::LeftButton || m_track.oscillator) return;
+    if (e->button() != Qt::LeftButton) return;
+    if (m_selectOverlay && !m_overlays.empty() && keyAt(e->position()) < 0) {
+        int handle = -1;
+        bool out = false;
+        const double time = tOf(e->position().x()), played = playedAt(time);
+        const double active = shown().valueAt(time, played);
+        double distance = std::isfinite(active) ? std::min(7.0, std::abs(yOf(active) - e->position().y())) : 7.0;
+        int best = -1;
+        if (!handleAt(e->position(), &handle, &out)) {
+            for (const auto &overlay : m_overlays) {
+                const double value = overlay.track.valueAt(time, played);
+                if (!std::isfinite(value)) continue;
+                const double candidate = std::abs(yOf(value) - e->position().y());
+                if (candidate < distance) distance = candidate, best = overlay.index;
+            }
+        }
+        if (best >= 0) {
+            emit overlaySelected(best);
+            return;
+        }
+    }
+    if (m_track.oscillator) return;
     int hk = -1;
     bool out = false;
     if (handleAt(e->position(), &hk, &out)) {

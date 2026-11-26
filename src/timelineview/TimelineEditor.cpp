@@ -1231,7 +1231,9 @@ void TrackRow::build()
     connect(m_lane, &CurveLane::zoomValue, this, [this](double factor, double anchor) {
         AnimEditor::LaneView &lv = m_ed->laneView(m_i);
         double vlo = 0, vhi = 1;
-        m_ed->viewOfLane(m_i, m_lane->fullLo(), m_lane->fullHi(), &vlo, &vhi);
+        const auto [lo, hi] = m_ed->m_overlayIndex == m_i && m_ed->m_overlayRange
+        ? *m_ed->m_overlayRange : fullRange();
+    m_ed->viewOfLane(m_i, lo, hi, &vlo, &vhi);
         const double nlo = anchor - (anchor - vlo) / factor, nhi = anchor + (vhi - anchor) / factor;
         lv.zoom = std::clamp(lv.zoom * factor, 1.0, 1e6);
         lv.center = (nlo + nhi) / 2;
@@ -1240,7 +1242,9 @@ void TrackRow::build()
     connect(m_lane, &CurveLane::panValue, this, [this](double dv) {
         AnimEditor::LaneView &lv = m_ed->laneView(m_i);
         double vlo = 0, vhi = 1;
-        m_ed->viewOfLane(m_i, m_lane->fullLo(), m_lane->fullHi(), &vlo, &vhi);
+        const auto [lo, hi] = m_ed->m_overlayIndex == m_i && m_ed->m_overlayRange
+        ? *m_ed->m_overlayRange : fullRange();
+    m_ed->viewOfLane(m_i, lo, hi, &vlo, &vhi);
         lv.center = (vlo + vhi) / 2 + dv;
         applyView();
     });
@@ -1524,7 +1528,9 @@ void TrackRow::updateLane()
 void TrackRow::applyView()
 {
     double vlo = 0, vhi = 1;
-    m_ed->viewOfLane(m_i, m_lane->fullLo(), m_lane->fullHi(), &vlo, &vhi);
+    const auto [lo, hi] = m_ed->m_overlayIndex == m_i && m_ed->m_overlayRange
+        ? *m_ed->m_overlayRange : fullRange();
+    m_ed->viewOfLane(m_i, lo, hi, &vlo, &vhi);
     m_lane->setView(m_ed->m_t0, m_ed->m_t1, vlo, vhi);
     m_colorLane->setView(m_ed->m_t0, m_ed->m_t1);
     m_eventLane->setView(m_ed->m_t0, m_ed->m_t1);
@@ -1655,6 +1661,27 @@ AnimEditor::AnimEditor(TimelineHost *host, QUndoStack *undo, Layout layout, bool
             r3->addWidget(b);
         }
         v->addLayout(r3);
+    }
+
+    if (side) {
+        auto *overlayOptions = new QHBoxLayout;
+        m_overlay = new QCheckBox(QStringLiteral("Overlay tracks"));
+        m_overlay->setObjectName(QStringLiteral("overlayTracks"));
+        m_editTrack = new QComboBox;
+        m_editTrack->setObjectName(QStringLiteral("overlayEditTrack"));
+        m_editTrack->setAccessibleName(QStringLiteral("Track to edit"));
+        m_pickCurve = new QCheckBox(QStringLiteral("Click curve to select"));
+        m_pickCurve->setObjectName(QStringLiteral("overlayClickSelect"));
+        m_pickCurve->setChecked(true);
+        overlayOptions->addWidget(m_overlay);
+        overlayOptions->addWidget(m_editTrack, 1);
+        overlayOptions->addWidget(m_pickCurve);
+        m_editTrack->hide();
+        m_pickCurve->hide();
+        v->addLayout(overlayOptions);
+        connect(m_overlay, &QCheckBox::toggled, this, &AnimEditor::updateOverlay);
+        connect(m_pickCurve, &QCheckBox::toggled, this, &AnimEditor::updateOverlay);
+        connect(m_editTrack, &QComboBox::currentIndexChanged, this, &AnimEditor::updateOverlay);
     }
 
     // Playback is separate from view scrolling. Text never contributes a changing
@@ -1867,18 +1894,82 @@ void AnimEditor::reload()
     poll();
 }
 
+namespace {
+bool canOverlay(const AnimTrack &track)
+{
+    return !track.color && !track.event && !track.isPoint();
+}
+}
+
 void AnimEditor::rebuildRows()
 {
+    const int previous = m_editTrack && m_editTrack->currentIndex() >= 0 ? m_editTrack->currentData().toInt() : -1;
     for (TrackRow *r : m_rows) {
         r->hide();
         r->deleteLater();
     }
     m_rows.clear();
+    if (m_editTrack) {
+        const QSignalBlocker block(m_editTrack);
+        m_editTrack->clear();
+        for (int k = 0; k < int(m_edit.tracks.size()); ++k)
+            if (canOverlay(m_edit.tracks[k]))
+                m_editTrack->addItem(QStringLiteral("%1 · %2").arg(k + 1).arg(trackLabel(m_edit.tracks[k])), k);
+        const int selection = m_editTrack->findData(previous);
+        if (selection >= 0) m_editTrack->setCurrentIndex(selection);
+        m_overlay->setVisible(m_editTrack->count() > 1);
+    }
     for (int k = 0; k < int(m_edit.tracks.size()); ++k) {
         TrackRow *r = makeRow(k);
         r->build();
+        if (m_editTrack)
+            connect(r->m_lane, &CurveLane::overlaySelected, this, [this](int index) {
+                const int item = m_editTrack->findData(index);
+                if (item >= 0) m_editTrack->setCurrentIndex(item);
+            });
         m_tracks->insertWidget(m_scrollTracks ? m_tracks->count() - 1 : m_tracks->count(), r, m_scrollTracks ? 0 : 1);
         m_rows.push_back(r);
+    }
+    updateOverlay();
+}
+
+void AnimEditor::updateOverlay()
+{
+    if (!m_editTrack) return;
+    const bool active = m_overlay->isChecked() && m_editTrack->count() > 1 && m_editTrack->currentIndex() >= 0;
+    m_editTrack->setVisible(active);
+    m_pickCurve->setVisible(active);
+    m_overlayIndex = active ? m_editTrack->currentData().toInt() : -1;
+    m_overlayRange.reset();
+    std::vector<CurveLane::Overlay> overlays;
+    const auto color = [](int index) { return QColor::fromHsv((335 + index * 79) % 360, 150, 225, 200); };
+    const QSignalBlocker block(m_editTrack);
+    for (int i = 0; i < m_editTrack->count(); ++i) {
+        const int index = m_editTrack->itemData(i).toInt();
+        if (index >= int(m_rows.size()) || index >= int(m_edit.tracks.size())) continue;
+        const auto &track = m_edit.tracks[index];
+        m_editTrack->setItemText(i, QStringLiteral("%1 · %2").arg(index + 1).arg(trackLabel(track)));
+        m_editTrack->setItemData(i, index == m_overlayIndex ? QVariant{} : QVariant(color(index)), Qt::ForegroundRole);
+        if (!active) continue;
+        const auto [lo, hi] = m_rows[index]->fullRange();
+        if (!m_overlayRange) m_overlayRange = std::pair{lo, hi};
+        else {
+            m_overlayRange->first = std::min(m_overlayRange->first, lo);
+            m_overlayRange->second = std::max(m_overlayRange->second, hi);
+        }
+        if (index == m_overlayIndex) continue;
+        auto shown = track;
+        if (!shown.keys.empty() && shown.keys.front().isCurrentValue && !std::isfinite(shown.captured))
+            shown.captured = m_rows[index]->currentValue();
+        overlays.push_back({index, std::move(shown), color(index)});
+    }
+    for (int i = 0; i < int(m_rows.size()); ++i) {
+        if (i >= int(m_edit.tracks.size())) break;
+        auto *row = m_rows[i];
+        row->setVisible(!active || i == m_overlayIndex || !canOverlay(m_edit.tracks[i]));
+        if (i == m_overlayIndex) row->m_lane->setOverlays(std::move(overlays), m_pickCurve->isChecked());
+        else row->m_lane->setOverlays({}, false);
+        if (row->isVisibleTo(this)) row->applyView();
     }
 }
 
@@ -1890,6 +1981,7 @@ void AnimEditor::commit(const QString &text, const QString &mergeKey)
     m_committing = true;
     store(before, m_edit, text, mergeKey);
     m_committing = false;
+    if (m_overlay && m_overlay->isChecked() && m_rows.size() == m_edit.tracks.size()) updateOverlay();
     emit edited();
 }
 

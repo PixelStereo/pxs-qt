@@ -14,6 +14,7 @@
 #include <functional>
 #include <limits>
 #include <map>
+#include <optional>
 #include <vector>
 
 class QComboBox;
@@ -203,7 +204,7 @@ public:
     TrackRow(AnimEditor *editor, int index);
     void build(); // the widgets: called once, right after construction (buildHeader is virtual)
     void setPlayhead(double pos, double played, bool backwards, bool shown);
-    void setLive(double captured, const std::array<double, 3> &capturedRgb, const std::array<double, 2> &capturedXy, bool running);
+    virtual void setLive(double captured, const std::array<double, 3> &capturedRgb, const std::array<double, 2> &capturedXy, bool running);
     void applyView();                            // the editor's zoom
     std::pair<double, double> fullRange() const;
     virtual void fill(); // the widgets from the track
@@ -218,6 +219,7 @@ protected:
     void changed(bool lane = true, const QString &mergeKey = {}); // the track edited: to the engine
     std::pair<double, double> range() const;
     double currentValue() const;
+    friend class AnimEditor;
     AnimEditor *m_ed;
     TimelineHost *m_host;
     int m_i;
@@ -280,12 +282,14 @@ protected:
     // the arrows of a number) form one step.
     virtual void store(const Animation &before, const Animation &after, const QString &text, const QString &mergeKey) = 0;
     virtual void control(AnimAction action, double time = 0) = 0;
+    virtual QString trackLabel(const AnimTrack &track) const { return track.param; }
     virtual TrackRow *makeRow(int index) { return new TrackRow(this, index); }
     virtual void bindDriverWidget(QWidget *, int, const QString &) {}
     virtual void syncDrivenValues() {}
     virtual void loaded() {} // after a reload (the subclass's own widgets)
     void commit(const QString &text, const QString &mergeKey = {});
     void rebuildRows();
+    void updateOverlay();
     void forgetView(); // another animation: shown whole on the next reload
     void forgetParams() { m_params.clear(); } // the layers changed: their numbers are read again
     void setEditorEnabled(bool on);
@@ -331,6 +335,10 @@ private:
     std::map<quint64, std::vector<ParamInfo>> m_params; // by layer, until the next reload
     bool m_freshView = true;
     int m_laneHeight = 96;
+    QCheckBox *m_overlay = nullptr, *m_pickCurve = nullptr;
+    QComboBox *m_editTrack = nullptr;
+    std::optional<std::pair<double, double>> m_overlayRange;
+    int m_overlayIndex = -1;
 };
 
 // Is `a` the same animation as `b`, as edited (its transport where it is left out)?

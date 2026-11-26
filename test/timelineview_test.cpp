@@ -2,7 +2,9 @@
 #include <pxs/TimelineEditor.h>
 
 #include <QApplication>
+#include <QCheckBox>
 #include <QComboBox>
+#include <QMouseEvent>
 #include <QDoubleSpinBox>
 
 #include <cstdio>
@@ -125,6 +127,51 @@ int main(int argc, char **argv)
     const auto params = animationMenuParams(&host, 0);
     CHECK(params.size() == 1 && params.front().path == "level");
     CHECK(animWaveName(AnimWave::Square) == "Step (square)");
+
+    // Overlay selection changes the editable lane without writing to either curve.
+    t.oscillator = true;
+    t.center = 2;
+    t.amplitude = 0;
+    auto other = t;
+    other.center = 8;
+    timeline.tracks = {t, other};
+    editor.reload();
+    app.processEvents();
+    auto *overlay = editor.findChild<QCheckBox *>("overlayTracks");
+    auto *picker = editor.findChild<QComboBox *>("overlayEditTrack");
+    auto *clickSelect = editor.findChild<QCheckBox *>("overlayClickSelect");
+    CHECK(overlay && picker && clickSelect);
+    if (overlay && picker && clickSelect) {
+        overlay->setChecked(true);
+        app.processEvents();
+        const auto editorLane = [&]() -> pxs::curveview::CurveLane * {
+            pxs::curveview::CurveLane *visible = nullptr;
+            for (auto *lane : editor.findChildren<pxs::curveview::CurveLane *>())
+                if (lane->isVisibleTo(&editor)) {
+                    CHECK(!visible);
+                    visible = lane;
+                }
+            return visible;
+        };
+        const auto clickValue = [&](double value) {
+            auto *lane = editorLane();
+            CHECK(lane);
+            if (!lane) return;
+            const QPointF point(lane->width() / 2., 8 + (1 - value / 10.) * (lane->height() - 16));
+            QMouseEvent event(QEvent::MouseButtonPress, point, lane->mapToGlobal(point.toPoint()),
+                              Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+            QApplication::sendEvent(lane, &event);
+            app.processEvents();
+        };
+        const int before = editor.stores;
+        picker->setCurrentIndex(1);
+        CHECK(editorLane() && editorLane()->track().center == 8);
+        clickValue(2);
+        CHECK(picker->currentIndex() == 0);
+        clickSelect->setChecked(false);
+        clickValue(8);
+        CHECK(picker->currentIndex() == 0 && editor.stores == before);
+    }
 
     if (failures) std::fprintf(stderr, "timelineview: %d check(s) failed\n", failures);
     else std::printf("timelineview: ok\n");

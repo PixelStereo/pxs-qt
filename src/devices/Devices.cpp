@@ -412,6 +412,16 @@ std::optional<int> Devices::dmxLevel(quint64 id, const QString &path) const
     return width == 2 ? (int(coarse) << 8) | static_cast<unsigned char>(universe->second.at(channel)) : int(coarse);
 }
 
+pxs::core::midi::Bytes Devices::midiOutput(quint64 id, const QString &path) const
+{
+    const Device *device = m_registry.find(id);
+    if (!device || device->kind != Kind::Midi) return {};
+    const auto key = utf8(path);
+    const auto *address = device->address(key);
+    const auto value = m_registry.last(id, key);
+    return address && value ? core::midiBytes(*device, *address, *value) : pxs::core::midi::Bytes{};
+}
+
 bool Devices::send(quint64 id, const QString &path, double value)
 {
     const Device *d = m_registry.find(id);

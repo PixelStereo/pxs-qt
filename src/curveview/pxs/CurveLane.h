@@ -3,6 +3,7 @@
 #include <Anim.h>
 
 #include <QWidget>
+#include <QColor>
 #include <cmath>
 #include <functional>
 #include <limits>
@@ -26,6 +27,8 @@ public:
     void setPlayhead(double position, bool shown, double played = NAN, bool backwards = false);
     // The value the curve gives for the signal at the playhead (`shown`: false hides it): a dot on the curve with a guide to the value axis
     void setProbe(double value, bool shown);
+    struct Overlay { int index; AnimTrack track; QColor color; };
+    void setOverlays(std::vector<Overlay> overlays, bool selectOnClick);
     void setCurrentValue(std::function<double()> f) { m_current = std::move(f); }
     void setLive(double v); // the value a "current value" first key starts from (captured, or the number now)
     double fullLo() const { return m_lo; }
@@ -36,6 +39,7 @@ public:
 
 signals:
     // gesture: the edits of one drag share a number, counted in this lane (the application joins it to what names the lane, for one undo step); 0: an edit on its own
+    void overlaySelected(int index);
     void edited(const AnimTrack &t, int gesture);
     void zoomTime(double factor, double anchor); // ⌘/Ctrl + wheel
     void panTime(double seconds);                // Shift + wheel, horizontal wheel, middle drag
@@ -52,6 +56,7 @@ protected:
     void wheelEvent(QWheelEvent *e) override;
 
 private:
+    double playedAt(double time) const;
     double xOf(double t) const;
     double yOf(double v) const;
     double tOf(double x) const;
@@ -63,6 +68,8 @@ private:
     bool handleAt(QPointF p, int *key, bool *out) const;
     void dragHandle(QPointF pos, bool alone);
     void emitEdited(int gesture = 0);
+    std::vector<Overlay> m_overlays;
+    bool m_selectOverlay = false;
     AnimTrack m_track;
     double m_duration = 4, m_lo = 0, m_hi = 1;    // the whole
     double m_t0 = 0, m_t1 = 4, m_vlo = 0, m_vhi = 1; // what is shown
