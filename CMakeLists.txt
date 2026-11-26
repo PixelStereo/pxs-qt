@@ -124,7 +124,7 @@ add_library(pxs::presetview ALIAS pxs_presetview)
 set_target_properties(pxs_presetview PROPERTIES AUTOMOC ON POSITION_INDEPENDENT_CODE ON)
 target_include_directories(pxs_presetview PUBLIC src/presetview)
 target_link_libraries(pxs_sequenceview PRIVATE pxs::presetview)
-target_link_libraries(pxs_presetview PUBLIC pxs::tree pxs::params pxs::theme Qt6::Widgets)
+target_link_libraries(pxs_presetview PUBLIC pxs::interaction pxs::tree pxs::params pxs::theme Qt6::Widgets)
 
 # Expose an interface's own widgets (check box, number field, menu, text field, button) as parameters and messages
 add_library(pxs_bind STATIC src/bind/Bind.cpp src/bind/pxs/Bind.h)

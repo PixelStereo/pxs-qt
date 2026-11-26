@@ -4,6 +4,7 @@
 #include "Interactions.h"
 
 #include <QJsonObject>
+#include <cmath>
 
 void sortAnimKeys(AnimTrack &t)
 {
@@ -207,4 +208,44 @@ void animTransportFromJson(Animation &a, const QJsonObject &o)
     a.loop = animLoopFromKey(o.value("loop").toString());
     a.repeat = std::clamp(o.value("repeat").toInt(0), 0, 100000);
     a.speed = std::clamp(o.value("speed").toDouble(1.0), 0.0, 10.0);
+}
+
+
+QJsonObject animationDefinitionToJson(const Animation &animation)
+{
+    QJsonObject definition{{"id", double(animation.id)}, {"name", animation.name}};
+    animTransportToJson(animation, definition);
+    QJsonArray tracks;
+    for (const auto &track : animation.tracks) {
+        QJsonObject data;
+        animTrackToJson(track, data);
+        data["holder"] = double(track.layer);
+        data["path"] = track.param;
+        tracks.append(data);
+    }
+    definition["tracks"] = tracks;
+    return definition;
+}
+
+std::optional<Animation> animationDefinitionFromJson(const QJsonObject &definition)
+{
+    const double identity = definition.value("id").toDouble();
+    if (!(identity >= 1 && identity <= 9007199254740991.0 && std::floor(identity) == identity)
+        || !definition.value("tracks").isArray()) return std::nullopt;
+    Animation animation;
+    animation.id = quint64(identity);
+    animation.name = definition.value("name").toString();
+    animTransportFromJson(animation, definition);
+    for (const auto &value : definition.value("tracks").toArray()) {
+        const auto data = value.toObject();
+        const double holder = data.value("holder").toDouble(0);
+        if (!data.value("path").isString() || !(holder >= 0 && holder <= 9007199254740991.0 && std::floor(holder) == holder))
+            return std::nullopt;
+        AnimTrack track;
+        track.layer = quint64(holder);
+        track.param = data.value("path").toString();
+        animTrackFromJson(track, data, animation.duration);
+        animation.tracks.push_back(std::move(track));
+    }
+    return animation;
 }

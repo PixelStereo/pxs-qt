@@ -4,6 +4,7 @@
 // Right pane: inspector showing the captured tree parameters with checkboxes to include/exclude parameters in the scope.
 #include <pxs/core/tree/preset.h>
 #include <pxs/core/tree/tree.h>
+#include <Anim.h>
 
 #include <QWidget>
 #include <QElapsedTimer>
@@ -32,12 +33,19 @@ class PresetHost
 {
 public:
     virtual ~PresetHost() = default;
+    virtual std::vector<std::pair<quint64, QString>> timelineScopes() const { return {}; }
+    virtual std::optional<Animation> readTimeline(quint64) const { return std::nullopt; }
+    virtual void restoreTimeline(const Animation &) {}
     // Returns available capture scopes: pair of (prefix path, display label)
     virtual std::vector<std::pair<QString, QString>> scopes() const
     {
         return {{QStringLiteral(""), QStringLiteral("Tout l'arbre (Self)")}};
     }
 };
+
+std::optional<std::vector<Animation>> prepareTimelines(const pxs::core::tree::Preset &preset,
+    const std::function<bool(quint64)> &exists);
+void addTimelineDetails(QTreeWidget &tree, const pxs::core::tree::Preset &preset);
 
 void addParameterEditors(QTreeWidget &tree, QTreeWidgetItem &item, const std::string &path,
                          const pxs::core::tree::Preset &base, pxs::core::tree::Preset &edits,
@@ -51,7 +59,7 @@ public:
     ~PresetView() override;
 
     const std::vector<pxs::core::tree::Preset> &presets() const { return m_presets; }
-    void setRecaller(std::function<void(int)> recall) { m_recall = std::move(recall); }
+    void setRecaller(std::function<bool(int)> recall) { m_recall = std::move(recall); }
     void rebuildScopes();
     QWidget *inspector() const { return m_inspector; }
     void setPresets(const std::vector<pxs::core::tree::Preset> &presets);
@@ -80,7 +88,7 @@ private:
     PresetHost *m_host;
     std::vector<pxs::core::tree::Preset> m_presets;
 
-    std::function<void(int)> m_recall;
+    std::function<bool(int)> m_recall;
     pxs::core::tree::PresetPlayback m_playback;
     QElapsedTimer m_recallClock;
     QTimer *m_playbackTimer;
@@ -96,6 +104,7 @@ private:
     QPushButton *m_updateBtn;
     QPushButton *m_recallBtn;
     QLabel *m_statusLabel;
+    QLabel *m_scopeSummary;
     QTreeWidget *m_paramsTree;
     QPushButton *m_checkAllBtn;
     QPushButton *m_uncheckAllBtn;

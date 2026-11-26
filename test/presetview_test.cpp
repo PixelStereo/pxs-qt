@@ -3,6 +3,9 @@
 #include <pxs/core/tree/parameter.h>
 
 #include <QApplication>
+#include <QComboBox>
+#include <QPushButton>
+#include <QTreeWidget>
 #include <cstdio>
 #include <memory>
 
@@ -33,6 +36,20 @@ std::unique_ptr<Parameter> makeParam(Cell &cell, const std::string &path, Type t
     return p;
 }
 
+class TimelineHost : public pxs::presetview::PresetHost
+{
+public:
+    Animation animation;
+    bool available = true;
+    std::vector<std::pair<quint64, QString>> timelineScopes() const override { return {{animation.id, animation.name}}; }
+    std::optional<Animation> readTimeline(quint64 id) const override
+    {
+        if (!available || id != animation.id) return std::nullopt;
+        return animation;
+    }
+    void restoreTimeline(const Animation &state) override { animation = state; }
+};
+
 } // namespace
 
 int main(int argc, char **argv)
@@ -62,6 +79,46 @@ int main(int argc, char **argv)
     bool recalled = view.recallPreset(0);
     check(recalled, "recall succeeded");
     check(speed.value.number().value_or(0) == 0.25, "value restored to 0.25 from preset");
+
+    TimelineHost host;
+    host.animation.id = 42;
+    host.animation.name = "Cue lights";
+    AnimTrack dimmer;
+    dimmer.layer = 3;
+    dimmer.param = "/dimmer";
+    dimmer.keys = {AnimKey{0, 0.5}};
+    appendTrackRemap(dimmer, 0, 1, 0, 255);
+    host.animation.tracks = {dimmer};
+    pxs::presetview::PresetView timelines(tree, nullptr, &host);
+    auto *scope = timelines.findChild<QComboBox *>("presetScope");
+    auto *update = timelines.findChild<QPushButton *>("updatePreset");
+    check(scope && update && scope->findData("timeline:42") >= 0, "timeline is offered as a scope");
+    if (scope && update) {
+        scope->setCurrentIndex(scope->findData("timeline:42"));
+        timelines.captureCurrent(QStringLiteral("Lighting"));
+        check(timelines.presets().size() == 1 && timelines.presets().front().values.empty(), "timeline-only preset captured");
+        if (!timelines.presets().empty()) {
+            const auto capturedId = timelines.presets().front().id;
+            auto *details = timelines.inspector()->findChild<QTreeWidget *>();
+            check(details && !details->findItems("Remap", Qt::MatchExactly | Qt::MatchRecursive).empty(), "stored filter is shown");
+            scope->setCurrentIndex(0); // the capture menu is independent of the stored scope
+            host.animation.tracks.front().keys.front().v = 0.75;
+            update->click();
+            check(timelines.presets().size() == 1 && timelines.presets().front().id == capturedId &&
+                  timelines.presets().front().scope == "timeline:42", "updating preserves the preset identity and scope");
+            const auto saved = Preset::fromJson(timelines.presets().front().toJson());
+            timelines.setPresets({saved});
+            host.animation.tracks.clear();
+            check(timelines.recallPreset(0) && host.animation.tracks.size() == 1, "recall restores a track after serialization");
+            if (!host.animation.tracks.empty()) {
+                const auto &restored = host.animation.tracks.front();
+                check(restored.layer == 3 && restored.param == "/dimmer" && restored.keys.front().v == 0.75 &&
+                      restored.dataFilters == dimmer.dataFilters, "recall restores routing, edited key and Remap");
+            }
+            host.available = false;
+            check(!timelines.recallPreset(0), "recall fails if the timeline is missing");
+        }
+    }
 
     if (failures) std::fprintf(stderr, "presetview: %d failure(s)\n", failures);
     else std::puts("presetview: ok");

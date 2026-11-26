@@ -13,6 +13,7 @@
 #include <pxs/core/timeline/timeline.h>
 
 #include <QJsonArray>
+#include <optional>
 #include <QJsonObject>
 #include <QString>
 #include <QStringList>
@@ -110,3 +111,5 @@ void animTrackToJson(const AnimTrack &t, QJsonObject &o);
 void animTrackFromJson(AnimTrack &t, const QJsonObject &o, double duration);
 void animTransportToJson(const Animation &a, QJsonObject &o);
 void animTransportFromJson(Animation &a, const QJsonObject &o);
+QJsonObject animationDefinitionToJson(const Animation &animation);
+std::optional<Animation> animationDefinitionFromJson(const QJsonObject &definition);
