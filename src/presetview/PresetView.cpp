@@ -96,7 +96,7 @@ void showTrack(QTreeWidgetItem *parent, const AnimTrack &track, const QString &n
 {
     const auto target = track.param.isEmpty() ? QStringLiteral("Unassigned") : track.param;
     const QString source = track.oscillator
-        ? QStringLiteral("%1 · %2 s period").arg(animWaveName(track.wave)).arg(track.period)
+        ? QStringLiteral("%1 · %2 s period").arg(animWaveKeys().value(int(track.wave)).replace(QLatin1Char('_'), QLatin1Char(' '))).arg(track.period)
         : QStringLiteral("%1 key(s)").arg(track.keys.size());
     auto *row = new QTreeWidgetItem(parent, {name, target + QStringLiteral(" · ") + source});
     for (size_t k = 0; k < track.keys.size(); ++k) {
