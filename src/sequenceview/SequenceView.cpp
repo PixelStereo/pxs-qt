@@ -158,22 +158,24 @@ SequenceView::SequenceView(Sequencer &sequencer, SequenceViewHost *host, QUndoSt
 
     // The transport: GO, the step on standby, GO BACK, Stop, Stop all
     auto *top = new QHBoxLayout;
-    top->setSpacing(10);
+    top->setSpacing(6);
     m_go = new QPushButton(QStringLiteral("GO"));
     m_go->setObjectName(QStringLiteral("go"));
     m_go->setToolTip(QStringLiteral("Plays the step on standby (space bar)"));
-    m_go->setMinimumSize(140, 64);
-    m_go->setStyleSheet(QStringLiteral("QPushButton#go { background: #2fa45a; color: #ffffff; font-size: 26px; font-weight: 800; letter-spacing: 2px;"
-                                       " border: none; border-radius: 10px; }"
+    m_go->setMinimumSize(54, 36);
+    m_go->setStyleSheet(QStringLiteral("QPushButton#go { background: #2fa45a; color: #ffffff; font-weight: 600;"
+                                       " border: none; border-radius: 4px; }"
                                        "QPushButton#go:hover { background: #38bd69; }"
                                        "QPushButton#go:pressed { background: #23864a; }"
                                        "QPushButton#go:disabled { background: #2b2e34; color: #6b6f78; }"));
     top->addWidget(m_go);
     auto *standby = new QVBoxLayout;
     auto *standbyTitle = new QLabel(QStringLiteral("STANDBY"));
-    standbyTitle->setStyleSheet(QStringLiteral("color: #8a8e97; font-size: 10px; letter-spacing: 1.5px;"));
+    standbyTitle->setStyleSheet(QStringLiteral("color: #8a8e97; font-weight: 500;"));
     m_next = new QLabel;
-    m_next->setStyleSheet(QStringLiteral("font-size: 20px; font-weight: 600;"));
+    m_next->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    m_next->setWordWrap(true);
+    m_next->setStyleSheet(QStringLiteral("font-weight: 600;"));
     m_state = new QLabel;
     m_state->setObjectName(QStringLiteral("caption"));
     standby->addWidget(standbyTitle);
@@ -199,7 +201,7 @@ SequenceView::SequenceView(Sequencer &sequencer, SequenceViewHost *host, QUndoSt
     m_table->horizontalHeader()->setSectionResizeMode(TextColumn, QHeaderView::Stretch);
     m_table->horizontalHeader()->setSectionResizeMode(TimelineColumn, QHeaderView::Stretch);
     for (const auto &[c, w] : std::initializer_list<std::pair<int, int>>{
-             {PreWaitColumn, 84}, {ActionColumn, 110}, {ValueColumn, 84}, {PostWaitColumn, 84}, {NextColumn, 74}})
+             {PreWaitColumn, 66}, {ActionColumn, 80}, {ValueColumn, 58}, {PostWaitColumn, 66}, {NextColumn, 53}})
         m_table->setColumnWidth(c, w);
     m_table->horizontalHeaderItem(NextColumn)->setToolTip(QStringLiteral("GO: the next step waits for GO. AUTO: it follows once this one's "
                                                                          "action and post-wait are over. Double-click to flip"));

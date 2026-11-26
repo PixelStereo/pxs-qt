@@ -27,6 +27,8 @@ public:
     explicit DevicesPanel(Devices *devices, const QString &hint = {}, QWidget *parent = nullptr);
 
     quint64 selected() const;
+    QWidget *inspector() const;
+    void setCompactList();
     void select(quint64 id);
 
 signals:

@@ -268,6 +268,13 @@ DevicesPanel::DevicesPanel(Devices *devices, const QString &hint, QWidget *paren
     refresh();
 }
 
+QWidget *DevicesPanel::inspector() const { return m_pages; }
+
+void DevicesPanel::setCompactList()
+{
+    m_list->setMinimumWidth(0);
+}
+
 quint64 DevicesPanel::selected() const
 {
     const QListWidgetItem *item = m_list->currentItem();

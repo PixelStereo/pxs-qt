@@ -3,6 +3,9 @@
 
 #include <QApplication>
 #include <QComboBox>
+#include <QDragEnterEvent>
+#include <QDropEvent>
+#include <QMimeData>
 #include <QPushButton>
 #include <QTableWidget>
 #include <QTimer>
@@ -65,12 +68,15 @@ int main(int argc, char **argv)
               pxs::sequenceview::SequenceView::seconds(65) == QLatin1String("1:05.0"),
           "its pre-wait, as the list shows times");
 
-    // + Step: a step on the host's current timeline, an undo step
-    QPushButton *add = nullptr;
-    for (auto *b : view.findChildren<QPushButton *>())
-        if (b->text() == QLatin1String("+ Step")) add = b;
-    check(add != nullptr, "+ Step");
-    if (add) add->click();
+    // A timeline dragged below the last cue is inserted as an undoable step.
+    QMimeData timelineDrag;
+    timelineDrag.setData("application/x-pxs-timeline", QByteArray("6"));
+    const QPoint dropAt(10, table->rowHeight(0) + 10);
+    QDragEnterEvent enter(dropAt, Qt::CopyAction, &timelineDrag, Qt::LeftButton, Qt::NoModifier);
+    QApplication::sendEvent(table->viewport(), &enter);
+    check(enter.isAccepted(), "timeline drag accepted");
+    QDropEvent drop(QPointF(dropAt), Qt::CopyAction, &timelineDrag, Qt::LeftButton, Qt::NoModifier);
+    QApplication::sendEvent(table->viewport(), &drop);
     check(seq.sequence(0).steps.size() == 2 && seq.sequence(0).steps[1].timeline == 6 && undo.count() == 1, "a step made, on the current timeline, undoable");
     check(table->rowCount() == 2, "its row");
     undo.undo();
