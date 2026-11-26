@@ -1029,6 +1029,52 @@ AnimTrack &TrackRow::editedTrack() { return track().isPoint() ? track().axes[siz
 const AnimTrack &TrackRow::editedTrack() const { return track().isPoint() ? track().axes[size_t(m_axisIndex)] : track(); }
 
 
+class TrackSignalMeter : public QWidget
+{
+public:
+    TrackSignalMeter(const QString &label, const QString &objectName)
+    {
+        auto *row = new QHBoxLayout(this);
+        row->setContentsMargins(4, 0, 4, 0);
+        row->addWidget(new QLabel(label));
+        m_bar = new QSlider(Qt::Horizontal);
+        m_bar->setObjectName(objectName);
+        m_bar->setRange(0, 1000);
+        m_bar->setFocusPolicy(Qt::NoFocus);
+        m_bar->setAttribute(Qt::WA_TransparentForMouseEvents);
+        m_low = new QLabel;
+        m_high = new QLabel;
+        row->addWidget(m_low);
+        row->addWidget(m_bar, 1);
+        row->addWidget(m_high);
+        m_value = new QLabel(QStringLiteral("—"));
+        m_value->setMinimumWidth(54);
+        m_value->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        row->addWidget(m_value);
+    }
+
+    void showValue(double value, std::pair<double, double> span)
+    {
+        const bool known = std::isfinite(value);
+        const auto [lo, hi] = span;
+        const double fraction = hi > lo ? std::clamp((value - lo) / (hi - lo), 0.0, 1.0) : 0.5;
+        m_bar->setValue(known ? int(std::lround(1000 * fraction)) : 0);
+        m_value->setText(known ? QString::number(value, 'g', 5) : QStringLiteral("—"));
+        const QString low = QString::number(lo, 'g', 5), high = QString::number(hi, 'g', 5);
+        if (m_low->text() != low) m_low->setText(low);
+        if (m_high->text() != high) m_high->setText(high);
+        const QString limits = QStringLiteral("Range: %1 to %2").arg(low, high);
+        if (toolTip() != limits) {
+            setToolTip(limits);
+            m_bar->setAccessibleDescription(limits);
+        }
+    }
+
+private:
+    QSlider *m_bar;
+    QLabel *m_low, *m_high, *m_value;
+};
+
 void TrackRow::build()
 {
     const bool side = m_ed->layout() == AnimEditor::Layout::Side;
@@ -1184,14 +1230,20 @@ void TrackRow::build()
     m_lane->setMinimumHeight(side ? 70 : std::max(70, m_ed->laneHeight()));
     m_lane->setCurrentValue([this] { return currentValue(); });
     box->addWidget(head);
-    box->addWidget(m_lane, 1);
+    auto *curveColumn = new QVBoxLayout;
+    curveColumn->setContentsMargins(0, 0, 0, 0);
+    curveColumn->setSpacing(2);
+    box->addLayout(curveColumn, 1);
+    curveColumn->addWidget(m_lane, 1);
+    m_rawMeter = new TrackSignalMeter(QStringLiteral("Timeline out"), QStringLiteral("animationTimelineSignal"));
+    curveColumn->addWidget(m_rawMeter);
     m_colorLane = new ColorLane;
     m_colorLane->setCurrentColor([this] {
         std::array<double, 3> rgb{1, 1, 1};
         m_host->animColorValue(editedTrack().layer, editedTrack().param, &rgb);
         return rgb;
     });
-    box->addWidget(m_colorLane, 1);
+    curveColumn->addWidget(m_colorLane, 1);
     connect(m_colorLane, &ColorLane::edited, this, [this](const AnimTrack &t, int gesture) {
         editedTrack().keys = t.keys;
         updateStartMode();
@@ -1200,7 +1252,7 @@ void TrackRow::build()
     connect(m_colorLane, &ColorLane::zoomTime, m_ed, &AnimEditor::zoomTime);
     connect(m_colorLane, &ColorLane::panTime, m_ed, &AnimEditor::panTime);
     m_eventLane = new EventLane;
-    box->addWidget(m_eventLane, 1);
+    curveColumn->addWidget(m_eventLane, 1);
     connect(m_eventLane, &EventLane::edited, this, [this](const AnimTrack &t, int gesture) {
         track().keys = t.keys;
         changed(false, gesture ? QStringLiteral("track%1/lane%2/events").arg(m_i).arg(gesture) : QString());
@@ -1267,8 +1319,8 @@ void TrackRow::build()
 
 void TrackRow::rebuildFilters()
 {
-    m_filterMeters.clear(); // their widgets go with the old ones
-    if (m_filterTimer) m_filterTimer->stop();
+    m_filterMeters.clear();
+    m_meterStages.clear();
     if (m_filters) {
         m_outer->removeWidget(m_filters);
         m_filters->hide();
@@ -1284,27 +1336,6 @@ void TrackRow::rebuildFilters()
         m_filters->hide();
         return;
     }
-    // The signal, through the chain: a meter for what comes in, then one under each filter (read only, the track's range)
-    auto meter = [this](QBoxLayout *into, const QString &name) {
-        auto *row = new QHBoxLayout;
-        auto *label = new QLabel(name);
-        label->setStyleSheet(QStringLiteral("color:#9a9aa0;"));
-        auto *bar = new QSlider(Qt::Horizontal);
-        bar->setObjectName(QStringLiteral("animationFilterSignal"));
-        bar->setRange(0, 1000);
-        bar->setFocusPolicy(Qt::NoFocus);
-        bar->setAttribute(Qt::WA_TransparentForMouseEvents);
-        bar->setToolTip(QStringLiteral("The signal here, now (read only)"));
-        auto *value = new QLabel(QStringLiteral("—"));
-        value->setMinimumWidth(64);
-        value->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-        row->addWidget(label);
-        row->addWidget(bar, 1);
-        row->addWidget(value);
-        into->addLayout(row);
-        m_filterMeters.emplace_back(bar, value);
-    };
-    if (!editedTrack().dataFilters.isEmpty()) meter(layout, QStringLiteral("In"));
     auto *add = new QPushButton(QStringLiteral("Add Data Filter…"));
     add->setObjectName("addAnimationDataFilter");
     layout->addWidget(add);
@@ -1349,6 +1380,7 @@ void TrackRow::rebuildFilters()
             auto value = InteractionStage::fromJson(array[k].toObject());
             fn(value);
             array[k] = value.toJson();
+            m_meterStages[size_t(k)] = value;
             changed(false, merge);
         };
         auto *enabled = new QCheckBox(QStringLiteral("%1 · %2").arg(k + 1).arg(interactionFilterName(stage.kind)));
@@ -1407,7 +1439,10 @@ void TrackRow::rebuildFilters()
                 rebuildFilters();
             });
         }
-        meter(column, QStringLiteral("Out"));
+        auto *meter = new TrackSignalMeter(QStringLiteral("Out"), QStringLiteral("animationFilterSignal"));
+        column->addWidget(meter);
+        m_filterMeters.push_back(meter);
+        m_meterStages.push_back(stage);
         if (stage.kind == InteractionFilter::Curve) {
             auto *curve = new CurveLane;
             curve->setTrack(stage.curve, 1, 0, 1);
@@ -1420,31 +1455,26 @@ void TrackRow::rebuildFilters()
             });
         }
     }
-    if (!m_filterTimer) {
-        m_filterTimer = new QTimer(this);
-        m_filterTimer->setInterval(50);
-        connect(m_filterTimer, &QTimer::timeout, this, &TrackRow::showFilterSignal);
-    }
-    if (m_filterMeters.empty()) m_filterTimer->stop();
-    else m_filterTimer->start();
 }
 
-void TrackRow::showFilterSignal()
+void TrackRow::showSignals()
 {
-    if (m_filterMeters.empty() || !isVisible()) return;
-    const AnimTrack &t = track();
-    const QString path = t.isPoint() ? t.param + (m_axisIndex ? "/y" : "/x") : t.param;
-    double input = 0;
+    if (!isVisible() || track().color || track().event) return;
+    const AnimTrack &t = editedTrack();
+    double input = m_lane->sampleAtPlayhead();
     std::vector<double> stages;
-    // A timeline's animation by its id; a layer's own animation under 0
-    const bool known = m_host->animationFilterSignal(t.layer, m_ed->m_edit.id, path, &input, &stages) ||
-                       m_host->animationFilterSignal(t.layer, 0, path, &input, &stages);
-    const auto [lo, hi] = range();
+    if (!m_filterMeters.empty()) {
+        double filteredInput = 0;
+        // A timeline uses its own id. Layer animations use id 0.
+        if (m_host->animationFilterSignal(t.layer, m_ed->m_edit.id, t.param, &filteredInput, &stages) ||
+            m_host->animationFilterSignal(t.layer, 0, t.param, &filteredInput, &stages))
+            input = filteredInput;
+    }
+    auto span = m_lane->signalSpan(range());
+    m_rawMeter->showValue(input, span);
     for (size_t k = 0; k < m_filterMeters.size(); ++k) {
-        const bool has = known && (k == 0 || k - 1 < stages.size());
-        const double v = !has ? 0 : k == 0 ? input : stages[k - 1];
-        m_filterMeters[k].first->setValue(has && hi > lo ? int(std::clamp((v - lo) / (hi - lo), 0.0, 1.0) * 1000) : 0);
-        m_filterMeters[k].second->setText(has ? QString::number(v, 'g', 4) : QStringLiteral("—"));
+        span = m_meterStages[k].outputSpan(span);
+        m_filterMeters[k]->showValue(k < stages.size() ? stages[k] : NAN, span);
     }
 }
 
@@ -1463,6 +1493,7 @@ void TrackRow::fill()
     const bool number = !t.color && !t.event;
     m_kind->setVisible(number);
     m_lane->setVisible(number);
+    m_rawMeter->setVisible(number);
     m_colorLane->setVisible(t.color && !t.event);
     m_eventLane->setVisible(t.event);
     m_kind->setCurrentIndex(t.oscillator ? 1 : 0);
@@ -1519,6 +1550,7 @@ void TrackRow::setLive(double captured, const std::array<double, 3> &capturedRgb
         m_colorLane->setLive(rgb);
     } else if (!m_lane->track().keys.empty() && m_lane->track().keys.front().isCurrentValue)
         m_lane->setLive(running ? (std::isfinite(captured) ? captured : editedTrack().keys.front().v) : currentValue());
+    showSignals();
 }
 
 std::pair<double, double> TrackRow::fullRange() const

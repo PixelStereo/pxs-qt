@@ -124,6 +124,7 @@ struct InteractionStage {
     QString displayName() const { return name.isEmpty() ? interactionFilterName(kind) : name; }
     static InteractionStage made(InteractionFilter kind); // with its defaults (a Curve: straight)
     static InteractionStage remap(double inMin, double inMax, double outMin, double outMax);
+    std::pair<double, double> outputSpan(std::pair<double, double> input) const;
     QJsonObject toJson() const;
     static InteractionStage fromJson(const QJsonObject &o);
     bool operator==(const InteractionStage &o) const;

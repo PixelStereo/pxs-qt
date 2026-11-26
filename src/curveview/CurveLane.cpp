@@ -119,6 +119,36 @@ void CurveLane::setPlayhead(double position, bool shown, double played, bool bac
     update();
 }
 
+double CurveLane::sampleAtPlayhead() const
+{
+    if (m_track.oscillator) return m_track.oscillatorOf().valueAt(m_played);
+    return pxs::core::timeline::curveAt(m_track.keys, m_playhead, m_live);
+}
+
+std::pair<double, double> CurveLane::signalSpan(std::pair<double, double> fallback) const
+{
+    if (m_track.oscillator && std::abs(m_track.amplitude) > 1e-12)
+        return {m_track.center - std::abs(m_track.amplitude), m_track.center + std::abs(m_track.amplitude)};
+
+    double lo = std::numeric_limits<double>::infinity(), hi = -lo;
+    const auto include = [&](double value) {
+        if (!std::isfinite(value)) return;
+        lo = std::min(lo, value);
+        hi = std::max(hi, value);
+    };
+    if (m_track.oscillator) include(m_track.center);
+    else for (size_t i = 0; i < m_track.keys.size(); ++i) {
+        include(shownValue(i));
+        if (i + 1 >= m_track.keys.size() || m_track.keys[i].curve != kAnimBezier) continue;
+        double t1, v1, t2, v2;
+        pxs::core::timeline::bezierHandles(m_track.keys, i, m_live, &t1, &v1, &t2, &v2);
+        include(v1);
+        include(v2);
+    }
+    if (hi - lo > 1e-12) return {lo, hi};
+    return {std::min(lo, fallback.first), std::max(hi, fallback.second)};
+}
+
 double CurveLane::xOf(double t) const { return kMargin + (t - m_t0) / (m_t1 - m_t0) * (width() - 2 * kMargin); }
 double CurveLane::tOf(double x) const
 {

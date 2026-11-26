@@ -9,6 +9,7 @@
 
 #include <pxs/TimelineHost.h>
 #include <pxs/CurveLane.h>
+#include <Interactions.h>
 
 #include <QWidget>
 #include <functional>
@@ -36,6 +37,7 @@ class QTimer;
 namespace pxs::timelineview {
 
 class AnimEditor;
+class TrackSignalMeter;
 
 
 // A sampled projection of both axis curves over the current pass. Seeking here
@@ -239,10 +241,11 @@ private:
     XyPathPreview *m_pointPreview = nullptr;
     void updateStartMode();
     void rebuildFilters();
-    void showFilterSignal(); // what comes in and what each filter makes of it, now
+    void showSignals();
     QWidget *m_filters = nullptr;
-    std::vector<std::pair<class QSlider *, QLabel *>> m_filterMeters; // the input, then each filter's output
-    class QTimer *m_filterTimer = nullptr;
+    TrackSignalMeter *m_rawMeter = nullptr;
+    std::vector<TrackSignalMeter *> m_filterMeters;
+    std::vector<InteractionStage> m_meterStages;
     QVBoxLayout *m_outer = nullptr;
     pxs::curveview::CurveLane *m_lane = nullptr;
     ColorLane *m_colorLane = nullptr;

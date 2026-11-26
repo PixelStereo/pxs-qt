@@ -5,6 +5,7 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QMouseEvent>
+#include <QSlider>
 #include <QDoubleSpinBox>
 
 #include <cstdio>
@@ -20,6 +21,14 @@ namespace {
 class Host : public TimelineHost
 {
 public:
+    std::vector<double> filterValues;
+    bool animationFilterSignal(quint64, quint64, const QString &, double *input, std::vector<double> *after) const override
+    {
+        if (filterValues.empty()) return false;
+        *input = 0.5;
+        *after = filterValues;
+        return true;
+    }
     std::vector<ParamInfo> animatableParams(quint64) const override
     {
         ParamInfo p;
@@ -171,6 +180,44 @@ int main(int argc, char **argv)
         clickSelect->setChecked(false);
         clickValue(8);
         CHECK(picker->currentIndex() == 0 && editor.stores == before);
+    }
+
+    // The unfiltered meter is present without a filter, on the curve's own scale.
+    t.center = 0.5;
+    t.amplitude = 0.5;
+    timeline.tracks = {t};
+    editor.reload();
+    app.processEvents();
+    const auto visibleMeters = [&](const QString &name) {
+        QList<QSlider *> visible;
+        for (auto *meter : editor.findChildren<QSlider *>(name))
+            if (meter->isVisibleTo(&editor)) visible.append(meter);
+        return visible;
+    };
+    editor.poll();
+    auto outputs = visibleMeters(QStringLiteral("animationTimelineSignal"));
+    CHECK(outputs.size() == 1 && outputs.front()->value() == 500);
+    CHECK(outputs.size() == 1 && outputs.front()->accessibleDescription() == QStringLiteral("Range: 0 to 1"));
+    CHECK(visibleMeters(QStringLiteral("animationFilterSignal")).empty());
+
+    appendTrackRemap(timeline.tracks[0], 0, 1, 0, 255);
+    auto clamp = InteractionStage::made(InteractionFilter::Clamp);
+    clamp.a = 0;
+    clamp.b = 200;
+    timeline.tracks[0].dataFilters.append(clamp.toJson());
+    host.filterValues = {127.5, 127.5};
+    editor.reload();
+    app.processEvents();
+    editor.poll();
+    outputs = visibleMeters(QStringLiteral("animationTimelineSignal"));
+    CHECK(outputs.size() == 1 && outputs.front()->value() == 500);
+    const auto filters = visibleMeters(QStringLiteral("animationFilterSignal"));
+    CHECK(filters.size() == 2);
+    if (filters.size() == 2) {
+        CHECK(filters[0]->accessibleDescription() == QStringLiteral("Range: 0 to 255"));
+        CHECK(filters[0]->value() == 500);
+        CHECK(filters[1]->accessibleDescription() == QStringLiteral("Range: 0 to 200"));
+        CHECK(filters[1]->value() == 638);
     }
 
     if (failures) std::fprintf(stderr, "timelineview: %d check(s) failed\n", failures);

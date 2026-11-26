@@ -31,6 +31,8 @@ public:
     void setOverlays(std::vector<Overlay> overlays, bool selectOnClick);
     void setCurrentValue(std::function<double()> f) { m_current = std::move(f); }
     void setLive(double v); // the value a "current value" first key starts from (captured, or the number now)
+    double sampleAtPlayhead() const;
+    std::pair<double, double> signalSpan(std::pair<double, double> fallback) const;
     double fullLo() const { return m_lo; }
     double fullHi() const { return m_hi; }
     const AnimTrack &track() const { return m_track; }
