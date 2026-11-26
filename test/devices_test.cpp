@@ -133,6 +133,9 @@ static void dmxDevices()
         CHECK(quint8(u[100]) == 255 && quint8(u[101]) == 128 && quint8(u[102]) == 0 && quint8(u[99]) == 0);
     }
     CHECK(told == 2);
+    // A legacy 0–1 patch can still be used in native units by an explicitly routed timeline.
+    CHECK(devices.sendNative(id, "/dimmer", 1) && devices.dmxLevel(id, "/dimmer") == 1);
+    CHECK(devices.sendNative(id, "/dimmer", 255) && devices.dmxLevel(id, "/dimmer") == 255);
 
     // Moved to another start address: what it took is let go
     Device moved = *devices.find(id);

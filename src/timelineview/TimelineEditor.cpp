@@ -1521,7 +1521,11 @@ void TrackRow::setLive(double captured, const std::array<double, 3> &capturedRgb
         m_lane->setLive(running ? (std::isfinite(captured) ? captured : editedTrack().keys.front().v) : currentValue());
 }
 
-std::pair<double, double> TrackRow::fullRange() const { return {m_lane->fullLo(), m_lane->fullHi()}; }
+std::pair<double, double> TrackRow::fullRange() const
+{
+    if (editedTrack().unitCurve) return {0.0, 1.0};
+    return {m_lane->fullLo(), m_lane->fullHi()};
+}
 
 std::pair<double, double> TrackRow::range() const { return m_ed->rangeOf(editedTrack()); }
 
