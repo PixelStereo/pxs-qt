@@ -41,7 +41,7 @@ struct AnimTrack {
     QString param;     // the number (see Engine::animatableParams): "opacity", "spatial/rotation", "fx/<fx>/param/<name>"…
     bool enabled = true;
     bool oscillator = false;
-    bool normalizedOutput = false; // track values are 0..1; the host maps them to the destination range
+    bool unitCurve = false; // use 0..1 as the starting curve scale, independent of the output
     std::vector<AnimKey> keys; // curve: sorted by time
     AnimWave wave = AnimWave::Sine;
     double period = 1, center = 0.5, amplitude = 0.5, phase = 0; // oscillator (phase: 0..1 of a period)
@@ -97,6 +97,7 @@ struct Animation : pxs::core::timeline::Transport {
 
 // The keys of a track in time order (a point's two axes too, which take the track's layer and their own /x and /y)
 void sortAnimKeys(AnimTrack &t);
+void appendTrackRemap(AnimTrack &track, double inMin, double inMax, double outMin, double outMax);
 
 // Saved: the keys of the waves ("sine", "triangle", "saw", "square", "random", "smooth_random") and of the loop modes ("once", "loop",
 // "pingpong"); what drives a number, into a JSON object (its keys [t, v, curve, "current", {"in": [dt, dv], "out": [dt, dv]}], all but t

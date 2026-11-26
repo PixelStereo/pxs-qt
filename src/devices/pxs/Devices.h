@@ -66,11 +66,14 @@ public:
     void refresh(quint64 id); // read again (OSCQuery), resolved again (OSC), its port opened again (MIDI)
 
     // The numbers of a device that can be driven: an OSCQuery device's leaves of one number that can be written, the others' addresses
-    std::vector<ParamInfo> params(quint64 id) const;
+    std::vector<ParamInfo> params(quint64 id, bool native = false) const;
+    bool nativeValue(quint64 id, const QString &path, double *v) const;
     bool value(quint64 id, const QString &path, double *v) const; // the last one known (read from the device, or sent)
     // Sends a value to an address of a device, as its kind and its address say. Sent again only when it changed (DMX: written in its
     // universe, sent by the outputs). False: no such device or address, or it cannot be reached now
     bool send(quint64 id, const QString &path, double value);
+    // MIDI and DMX take raw protocol units here. OSC uses its ordinary typed value.
+    bool sendNative(quint64 id, const QString &path, double value);
     // To an OSC device, at any path, as `type` says (f, d, i, h, T): the address does not need to be declared. False: not an OSC device,
     // or not reachable now. Every value is sent (a stream of signals)
     bool sendTo(quint64 id, const QString &path, char type, double value);
@@ -95,6 +98,7 @@ signals:
 private:
     struct Link;
     Link &link(quint64 id);
+    bool sendValue(quint64 id, const QString &path, double value, bool native);
     void connectDevice(quint64 id); // its transport, as it is now
     void openClient(quint64 id);
     void resolve(quint64 id);

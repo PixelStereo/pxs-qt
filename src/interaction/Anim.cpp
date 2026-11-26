@@ -1,6 +1,7 @@
 // The timelines' logic is pxs-core's (pxs/core/timeline/timeline.h); Anim.h is its Qt face. Here: how a timeline is saved (the keys of
 // NyxMap's projects, which read back the same).
 #include "Anim.h"
+#include "Interactions.h"
 
 #include <QJsonObject>
 
@@ -42,9 +43,14 @@ AnimLoop animLoopFromKey(const QString &k) { return AnimLoop(keyIndex(kLoopKeys,
 
 // What drives a number (a timeline's track, or a layer's animation), into a JSON object: its keys
 // [t, v, curve, "current", {"in": [dt, dv], "out": [dt, dv]}] (all but t and v when they matter) and its oscillator
+void appendTrackRemap(AnimTrack &track, double inMin, double inMax, double outMin, double outMax)
+{
+    track.dataFilters.append(InteractionStage::remap(inMin, inMax, outMin, outMax).toJson());
+}
+
 void animTrackToJson(const AnimTrack &t, QJsonObject &o)
 {
-    if (t.normalizedOutput) o["normalized_output"] = true;
+    if (t.unitCurve) o["unit_curve"] = true;
     if (!t.dataFilters.isEmpty()) o["data_filters"] = t.dataFilters;
     if (t.isPoint()) {
         o["type"] = QStringLiteral("point2d");
@@ -104,7 +110,7 @@ void animTrackToJson(const AnimTrack &t, QJsonObject &o)
 void animTrackFromJson(AnimTrack &t, const QJsonObject &o, double duration)
 {
     t.dataFilters = o.value("data_filters").toArray();
-    t.normalizedOutput = o.value("normalized_output").toBool();
+    t.unitCurve = o.value("unit_curve").toBool();
     t.axes.clear();
     if (o.value("type").toString() == QLatin1String("point2d")) {
         t.color = false;

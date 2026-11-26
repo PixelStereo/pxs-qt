@@ -57,6 +57,7 @@ struct Devices::Link {
     QHostAddress address;           // OSC: resolved
     bool ready = false;             // OSCQuery: its namespace is read
     QString error;                  // why it cannot be sent to
+    std::map<std::string, pxs::core::midi::Bytes> lastMidi;
 };
 
 Devices::Devices(const QString &selfName, quint16 selfPort, QObject *parent) : QObject(parent), m_selfName(selfName), m_selfPort(selfPort)
@@ -191,6 +192,7 @@ void Devices::connectDevice(quint64 id)
     m_registry.forgetSent(id);
     Link &l = link(id);
     l.error = text(d->validate());
+    l.lastMidi.clear();
     switch (d->kind) {
     case Kind::OscQuery: openClient(id); break;
     case Kind::Osc:
@@ -350,7 +352,7 @@ void Devices::refresh(quint64 id)
     emit changed();
 }
 
-std::vector<ParamInfo> Devices::params(quint64 id) const
+std::vector<ParamInfo> Devices::params(quint64 id, bool native) const
 {
     std::vector<ParamInfo> out;
     const Device *d = m_registry.find(id);
@@ -367,8 +369,9 @@ std::vector<ParamInfo> Devices::params(quint64 id) const
         const bool onOff = d->kind == Kind::Osc && a.type == 'T';
         const bool whole = (d->kind == Kind::Osc && (a.type == 'i' || a.type == 'h')) || (d->kind == Kind::Midi && a.message == pxs::core::midi::Kind::ProgramChange);
         p.type = whole ? ParamInfo::Type::Int : ParamInfo::Type::Float;
-        p.min = p.lo = a.min;
-        p.max = p.hi = a.max;
+        const bool protocolUnits = native && (d->kind == Kind::Dmx || d->kind == Kind::Midi);
+        p.min = p.lo = protocolUnits ? 0 : a.min;
+        p.max = p.hi = protocolUnits ? core::nativeMaximum(d->kind, a) : a.max;
         p.step = whole || onOff ? 1 : 0.01;
         p.animatable = true;
         out.push_back(p);
@@ -399,6 +402,16 @@ bool Devices::value(quint64 id, const QString &path, double *v) const
     return false;
 }
 
+bool Devices::nativeValue(quint64 id, const QString &path, double *v) const
+{
+    if (!value(id, path, v)) return false;
+    const auto *device = find(id);
+    if (device && (device->kind == Kind::Dmx || device->kind == Kind::Midi))
+        if (const auto *address = device->address(utf8(path)))
+            *v = core::unit(*address, *v) * core::nativeMaximum(device->kind, *address);
+    return true;
+}
+
 std::optional<int> Devices::dmxLevel(quint64 id, const QString &path) const
 {
     const Device *device = m_registry.find(id);
@@ -414,31 +427,48 @@ std::optional<int> Devices::dmxLevel(quint64 id, const QString &path) const
 
 pxs::core::midi::Bytes Devices::midiOutput(quint64 id, const QString &path) const
 {
-    const Device *device = m_registry.find(id);
-    if (!device || device->kind != Kind::Midi) return {};
-    const auto key = utf8(path);
-    const auto *address = device->address(key);
-    const auto value = m_registry.last(id, key);
-    return address && value ? core::midiBytes(*device, *address, *value) : pxs::core::midi::Bytes{};
+    const auto link = m_links.find(id);
+    if (link == m_links.end()) return {};
+    const auto message = link->second->lastMidi.find(utf8(path));
+    return message == link->second->lastMidi.end() ? pxs::core::midi::Bytes{} : message->second;
 }
 
 bool Devices::send(quint64 id, const QString &path, double value)
 {
+    return sendValue(id, path, value, false);
+}
+
+bool Devices::sendNative(quint64 id, const QString &path, double value)
+{
+    return sendValue(id, path, value, true);
+}
+
+bool Devices::sendValue(quint64 id, const QString &path, double value, bool native)
+{
     const Device *d = m_registry.find(id);
     if (!d || !std::isfinite(value)) return false;
     const std::string p = utf8(path);
+    const Address *address = d->address(p);
+    Address nativeAddress;
+    double storedValue = value;
+    if (native && address && (d->kind == Kind::Dmx || d->kind == Kind::Midi)) {
+        nativeAddress = *address;
+        nativeAddress.min = 0;
+        nativeAddress.max = core::nativeMaximum(d->kind, *address);
+        storedValue = address->min + core::unit(nativeAddress, value) * (address->max - address->min);
+        address = &nativeAddress;
+    }
     if (d->kind == Kind::Dmx) {
-        const Address *a = d->address(p);
-        if (!a) return false;
+        if (!address) return false;
         QByteArray &u = m_universes[d->universe];
         if (u.size() != pxs::core::dmx::kChannelCount) u = QByteArray(pxs::core::dmx::kChannelCount, '\0');
         const QByteArray before = u;
-        if (!core::writeDmx(*d, *a, value, reinterpret_cast<std::uint8_t *>(u.data()), std::size_t(u.size()))) return false;
-        m_registry.changed(id, p, value);
+        if (!core::writeDmx(*d, *address, value, reinterpret_cast<std::uint8_t *>(u.data()), std::size_t(u.size()))) return false;
+        m_registry.changed(id, p, storedValue);
         if (u != before) emit dmxChanged();
         return true;
     }
-    if (const auto last = m_registry.last(id, p); last && std::abs(*last - value) < 1e-9) return true; // the same: not again
+    if (const auto last = m_registry.last(id, p); d->kind != Kind::Midi && last && std::abs(*last - value) < 1e-9) return true; // the same: not again
     if (!online(id)) return false;
     bool done = false;
     if (d->kind == Kind::OscQuery) {
@@ -452,14 +482,16 @@ bool Devices::send(quint64 id, const QString &path, double value)
         if (!a) return false;
         done = m_udp.writeDatagram(bytes(pxs::core::osc::encode(core::oscMessage(*a, value))), m_links.at(id)->address, d->port) > 0;
     } else if (d->kind == Kind::Midi) {
-        const Address *a = d->address(p);
-        if (!a) return false;
-        const auto message = core::midiBytes(*d, *a, value);
+        if (!address) return false;
+        const auto message = core::midiBytes(*d, *address, value);
+        auto &last = link(id).lastMidi[p];
+        if (message == last) return true;
         if (!message.empty()) m_midi.at(text(d->midiPort))->send(message);
+        last = message;
         done = true;
     }
     if (done) {
-        m_registry.changed(id, p, value);
+        m_registry.changed(id, p, storedValue);
         ++m_sent;
     }
     return done;

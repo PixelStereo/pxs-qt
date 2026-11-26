@@ -192,7 +192,7 @@ static bool sameKeys(const std::vector<AnimKey> &a, const std::vector<AnimKey> &
 
 static bool sameTrack(const AnimTrack &a, const AnimTrack &b)
 {
-    if (a.layer != b.layer || a.param != b.param || a.enabled != b.enabled || a.oscillator != b.oscillator || a.normalizedOutput != b.normalizedOutput ||
+    if (a.layer != b.layer || a.param != b.param || a.enabled != b.enabled || a.oscillator != b.oscillator || a.unitCurve != b.unitCurve ||
         a.color != b.color || a.event != b.event || a.wave != b.wave || a.period != b.period || a.center != b.center ||
         a.amplitude != b.amplitude || a.phase != b.phase || a.seed != b.seed || !sameKeys(a.keys, b.keys) ||
         a.axes.size() != b.axes.size() || a.dataFilters != b.dataFilters)
@@ -1076,6 +1076,20 @@ void TrackRow::build()
         changed();
     });
 
+    m_curveScale = new QComboBox;
+    m_curveScale->addItems({QStringLiteral("Target range"), QStringLiteral("0–1")});
+    m_curveScale->setAccessibleName(QStringLiteral("Curve scale"));
+    m_curveScale->setToolTip(QStringLiteral("Changes the graph scale only. Use Remap to change the output."));
+    g->addWidget(new QLabel(QStringLiteral("Curve scale")), r, 0, 1, 2);
+    g->addWidget(m_curveScale, r++, 2, 1, 2);
+    connect(m_curveScale, &QComboBox::currentIndexChanged, this, [this](int index) {
+        if (m_filling) return;
+        editedTrack().unitCurve = index == 1;
+        m_ed->laneView(m_i).zoom = 1;
+        m_ed->laneView(m_i).center = NAN;
+        changed();
+    });
+
     m_kind = new QComboBox;
     m_kind->addItem(QStringLiteral("Keys"));
     m_kind->addItem(QStringLiteral("Wave"));
@@ -1300,14 +1314,20 @@ void TrackRow::rebuildFilters()
         for (int k = 0; k < kInteractionFilterCount; ++k) {
             const auto kind = InteractionFilter(k);
             menu->addAction(interactionFilterName(kind), this, [this, kind] {
-                auto stage = InteractionStage::made(kind);
                 const auto [lo, hi] = range();
-                if (kind == InteractionFilter::Remap) stage = InteractionStage::remap(lo, hi, lo, hi);
-                if (kind == InteractionFilter::Clamp) {
-                    stage.a = lo;
-                    stage.b = hi;
+                if (kind == InteractionFilter::Remap) {
+                    auto target = std::pair{lo, hi};
+                    for (const auto &param : m_ed->paramsOf(editedTrack().layer))
+                        if (param.path == editedTrack().param) { target = {param.min, param.max}; break; }
+                    appendTrackRemap(editedTrack(), lo, hi, target.first, target.second);
+                } else {
+                    auto stage = InteractionStage::made(kind);
+                    if (kind == InteractionFilter::Clamp) {
+                        stage.a = lo;
+                        stage.b = hi;
+                    }
+                    editedTrack().dataFilters.append(stage.toJson());
                 }
-                editedTrack().dataFilters.append(stage.toJson());
                 changed(false);
                 rebuildFilters();
             });
@@ -1431,6 +1451,7 @@ void TrackRow::showFilterSignal()
 void TrackRow::fill()
 {
     m_filling = true;
+    m_curveScale->setCurrentIndex(editedTrack().unitCurve ? 1 : 0);
     const AnimTrack &t = editedTrack();
     m_axis->setVisible(track().isPoint());
     m_axisOn->setVisible(track().isPoint());
@@ -1509,11 +1530,6 @@ double TrackRow::currentValue() const
     const AnimTrack &t = editedTrack();
     double v = 0;
     if (!m_host->animParamValue(t.layer, t.param, &v)) return range().first;
-    if (t.normalizedOutput) {
-        for (const auto &parameter : m_ed->paramsOf(t.layer))
-            if (parameter.path == t.param && parameter.max > parameter.min)
-                return std::clamp((v - parameter.min) / (parameter.max - parameter.min), 0.0, 1.0);
-    }
     return v;
 }
 
@@ -1849,7 +1865,7 @@ const std::vector<ParamInfo> &AnimEditor::paramsOf(quint64 layer)
 
 std::pair<double, double> AnimEditor::rangeOf(const AnimTrack &t)
 {
-    if (t.normalizedOutput) return {0.0, 1.0};
+    if (t.unitCurve) return {0.0, 1.0};
     for (const ParamInfo &p : paramsOf(t.layer))
         if (p.path == t.param) return {p.min, p.max};
     return {0.0, 1.0};

@@ -226,6 +226,7 @@ protected:
     bool m_filling = false;
 
 private:
+    QComboBox *m_curveScale = nullptr;
     QComboBox *m_kind = nullptr, *m_wave = nullptr;
     QComboBox *m_axis = nullptr;
     class QCheckBox *m_axisOn = nullptr;
