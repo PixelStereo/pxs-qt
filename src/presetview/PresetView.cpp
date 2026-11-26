@@ -231,8 +231,10 @@ PresetView::PresetView(pxs::core::tree::Tree &tree, QUndoStack *undo, PresetHost
 
     m_paramsTree = new QTreeWidget;
     m_paramsTree->setHeaderLabels({QStringLiteral("Parameter"), QStringLiteral("Value"), QStringLiteral("Time (s)"), QStringLiteral("Delay (s)"), QStringLiteral("Curve")});
-    m_paramsTree->header()->setSectionResizeMode(0, QHeaderView::Stretch);
-    m_paramsTree->header()->setSectionResizeMode(1, QHeaderView::Interactive);
+    m_paramsTree->header()->setSectionResizeMode(QHeaderView::Interactive);
+    m_paramsTree->header()->setStretchLastSection(false);
+    m_paramsTree->header()->setCascadingSectionResizes(false);
+    m_paramsTree->header()->resizeSection(0, 140);
     for (int i = 1; i <= 3; ++i) m_paramsTree->header()->resizeSection(i, 72);
     rightLayout->addWidget(m_paramsTree, 1);
 

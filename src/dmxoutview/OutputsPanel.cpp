@@ -55,8 +55,11 @@ OutputsPanel::OutputsPanel(QWidget *parent) : QWidget(parent)
     m_table->setHorizontalHeaderLabels({QStringLiteral("On"), QStringLiteral("Output"), QStringLiteral("Protocol"), QStringLiteral("State")});
     m_table->verticalHeader()->hide();
     m_table->verticalHeader()->setDefaultSectionSize(28);
-    m_table->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
-    m_table->horizontalHeader()->setSectionResizeMode(Name, QHeaderView::Stretch);
+    m_table->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
+    m_table->horizontalHeader()->setStretchLastSection(false);
+    m_table->horizontalHeader()->setCascadingSectionResizes(false);
+    m_table->setColumnWidth(On, 40);
+    m_table->setColumnWidth(Name, 135);
     m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_table->setSelectionMode(QAbstractItemView::SingleSelection);
     m_table->setMinimumHeight(96);

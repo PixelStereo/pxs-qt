@@ -198,10 +198,12 @@ SequenceView::SequenceView(Sequencer &sequencer, SequenceViewHost *host, QUndoSt
     m_table->setItemDelegate(new StepDelegate(m_table));
     m_table->setHorizontalHeaderLabels({QStringLiteral("Step"), QStringLiteral("Pre-wait"), QStringLiteral("Does"), QStringLiteral("Timeline"),
                                         QStringLiteral("Value"), QStringLiteral("Post-wait"), QStringLiteral("Then")});
-    m_table->horizontalHeader()->setSectionResizeMode(TextColumn, QHeaderView::Stretch);
-    m_table->horizontalHeader()->setSectionResizeMode(TimelineColumn, QHeaderView::Stretch);
+    m_table->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
+    m_table->horizontalHeader()->setStretchLastSection(false);
+    m_table->horizontalHeader()->setCascadingSectionResizes(false);
     for (const auto &[c, w] : std::initializer_list<std::pair<int, int>>{
-             {PreWaitColumn, 66}, {ActionColumn, 80}, {ValueColumn, 58}, {PostWaitColumn, 66}, {NextColumn, 53}})
+             {TextColumn, 112}, {PreWaitColumn, 66}, {ActionColumn, 80}, {TimelineColumn, 108},
+             {ValueColumn, 58}, {PostWaitColumn, 66}, {NextColumn, 53}})
         m_table->setColumnWidth(c, w);
     m_table->horizontalHeaderItem(NextColumn)->setToolTip(QStringLiteral("GO: the next step waits for GO. AUTO: it follows once this one's "
                                                                          "action and post-wait are over. Double-click to flip"));
@@ -505,7 +507,10 @@ QWidget *SequenceView::stepInspector(int row, QWidget *parent)
         form->addRow(QStringLiteral("Default fade (s)"), fade);
         auto *tree = new QTreeWidget;
         tree->setHeaderLabels({QStringLiteral("Parameter"), QStringLiteral("Value"), QStringLiteral("Time (s)"), QStringLiteral("Delay (s)"), QStringLiteral("Curve")});
-        tree->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+        tree->header()->setSectionResizeMode(QHeaderView::Interactive);
+        tree->header()->setStretchLastSection(false);
+        tree->header()->setCascadingSectionResizes(false);
+        tree->header()->resizeSection(0, 140);
         for (int i = 1; i <= 4; ++i) tree->header()->resizeSection(i, 72);
         auto *duration = new QLabel;
         const auto update = [step, preset, fade, duration] {

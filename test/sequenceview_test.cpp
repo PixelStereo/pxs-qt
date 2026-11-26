@@ -5,6 +5,8 @@
 #include <QComboBox>
 #include <QDragEnterEvent>
 #include <QDropEvent>
+#include <QHeaderView>
+#include <QMouseEvent>
 #include <QMimeData>
 #include <QPushButton>
 #include <QTableWidget>
@@ -67,6 +69,20 @@ int main(int argc, char **argv)
     check(table->item(0, 1)->data(Qt::EditRole).toDouble() == 1.0 && pxs::sequenceview::SequenceView::seconds(1) == QLatin1String("1.0") &&
               pxs::sequenceview::SequenceView::seconds(65) == QLatin1String("1:05.0"),
           "its pre-wait, as the list shows times");
+
+    auto *header = table->horizontalHeader();
+    const int oldStepWidth = header->sectionSize(0);
+    const int oldWaitWidth = header->sectionSize(1);
+    const QPointF handle(header->sectionViewportPosition(0) + oldStepWidth - 1, header->height() / 2);
+    const auto mouse = [&](QEvent::Type type, const QPointF &point, Qt::MouseButton button, Qt::MouseButtons buttons) {
+        QMouseEvent event(type, point, header->viewport()->mapToGlobal(point.toPoint()), button, buttons, Qt::NoModifier);
+        QApplication::sendEvent(header->viewport(), &event);
+    };
+    mouse(QEvent::MouseButtonPress, handle, Qt::LeftButton, Qt::LeftButton);
+    mouse(QEvent::MouseMove, handle + QPointF(22, 0), Qt::NoButton, Qt::LeftButton);
+    mouse(QEvent::MouseButtonRelease, handle + QPointF(22, 0), Qt::LeftButton, Qt::NoButton);
+    check(header->sectionSize(0) == oldStepWidth + 22 && header->sectionSize(1) == oldWaitWidth,
+          "dragging the separator resizes only its column");
 
     // A timeline dragged below the last cue is inserted as an undoable step.
     QMimeData timelineDrag;

@@ -209,10 +209,8 @@ DevicesPanel::DevicesPanel(Devices *devices, const QString &hint, QWidget *paren
     m_queryInfo = new QLabel;
     m_queryInfo->setWordWrap(true);
     m_queryInfo->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    auto *reread = new QPushButton(QStringLiteral("Read its namespace again"));
     qv->addWidget(m_queryTitle);
     qv->addWidget(m_queryInfo);
-    qv->addWidget(reread, 0, Qt::AlignLeft);
     qv->addStretch(1);
     m_pages->addWidget(query);
 
@@ -247,6 +245,9 @@ DevicesPanel::DevicesPanel(Devices *devices, const QString &hint, QWidget *paren
     mv->addWidget(new QLabel(QStringLiteral("<b>Addresses</b> — what it takes")));
     m_addresses = new QTableWidget(0, 0);
     m_addresses->verticalHeader()->hide();
+    m_addresses->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
+    m_addresses->horizontalHeader()->setStretchLastSection(false);
+    m_addresses->horizontalHeader()->setCascadingSectionResizes(false);
     m_addresses->setSelectionBehavior(QAbstractItemView::SelectRows);
     mv->addWidget(m_addresses, 1);
     auto *rows = new QHBoxLayout;
@@ -264,8 +265,16 @@ DevicesPanel::DevicesPanel(Devices *devices, const QString &hint, QWidget *paren
     connect(remove, &QPushButton::clicked, this, [this] {
         if (const quint64 id = selected()) m_d->remove(id);
     });
-    connect(reread, &QPushButton::clicked, this, [this] {
-        if (const quint64 id = selected()) m_d->refresh(id);
+    m_list->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_list, &QListWidget::customContextMenuRequested, this, [this](const QPoint &point) {
+        const auto *item = m_list->itemAt(point);
+        if (!item) return;
+        const auto id = item->data(Qt::UserRole).toULongLong();
+        const auto *device = m_d->find(id);
+        if (!device || device->kind != Kind::OscQuery) return;
+        QMenu context(this);
+        context.addAction(QStringLiteral("Read namespace again"), this, [this, id] { m_d->refresh(id); });
+        context.exec(m_list->viewport()->mapToGlobal(point));
     });
     for (QLineEdit *e : {m_name, m_host}) connect(e, &QLineEdit::editingFinished, this, [this] { store(); });
     for (QSpinBox *b : {m_port, m_universe, m_start, m_channel}) connect(b, &QSpinBox::editingFinished, this, [this] { store(); });
@@ -401,7 +410,6 @@ void DevicesPanel::fillTable()
     m_addresses->setRowCount(0);
     m_addresses->setColumnCount(int(heads.size()));
     m_addresses->setHorizontalHeaderLabels(heads);
-    m_addresses->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
     auto stored = [this](QWidget *w) {
         if (auto *c = qobject_cast<QComboBox *>(w)) connect(c, &QComboBox::currentIndexChanged, this, [this] { if (!m_filling) store(); });
         if (auto *n = qobject_cast<QDoubleSpinBox *>(w)) connect(n, &QDoubleSpinBox::editingFinished, this, [this] { store(); });
