@@ -20,7 +20,6 @@
 #include <QUdpSocket>
 
 #include <map>
-#include <functional>
 #include <memory>
 #include <vector>
 
@@ -48,7 +47,6 @@ public:
     explicit Devices(const QString &selfName = {}, quint16 selfPort = 0, QObject *parent = nullptr);
     ~Devices() override;
 
-    void setDiscoveryFilter(std::function<bool(const pxs::oscquery::Device &)> filter) { m_discoveryFilter = std::move(filter); }
     void startDiscovery(); // the OSCQuery devices of the network come and go
 
     std::vector<const Device *> all() const; // OSCQuery, OSC, DMX, MIDI, each by name
@@ -103,7 +101,6 @@ private:
     void found(const pxs::oscquery::Device &device);
     QString uniqueName(const Device &device) const;
 
-    std::function<bool(const pxs::oscquery::Device &)> m_discoveryFilter;
     QString m_selfName;
     quint16 m_selfPort;
     pxs::core::device::Registry m_registry;
