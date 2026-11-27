@@ -20,6 +20,7 @@
 
 class QComboBox;
 class QGridLayout;
+class QHBoxLayout;
 class QLabel;
 class QPushButton;
 class QScrollBar;
@@ -298,6 +299,8 @@ protected:
     void forgetParams() { m_params.clear(); } // the layers changed: their numbers are read again
     void setEditorEnabled(bool on);
     QVBoxLayout *mainLayout() const { return m_main; }
+    QVBoxLayout *timelineControlsLayout() const { return m_controls; }
+    QHBoxLayout *timelineTransportLayout() const { return m_transport; }
     struct LaneView {
         int axis = 0;
         bool xyPreview = false;
@@ -336,6 +339,8 @@ protected:
 
 private:
     QVBoxLayout *m_main;
+    QVBoxLayout *m_controls;
+    QHBoxLayout *m_transport;
     std::map<quint64, std::vector<ParamInfo>> m_params; // by layer, until the next reload
     bool m_freshView = true;
     int m_laneHeight = 96;
