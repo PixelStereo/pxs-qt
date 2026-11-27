@@ -1668,11 +1668,11 @@ AnimEditor::AnimEditor(TimelineHost *host, QUndoStack *undo, Layout layout, bool
         if (dim) l->setStyleSheet("color:#9a9aa0;");
         return l;
     };
+    m_transport = new QHBoxLayout;
+    for (QWidget *w : std::initializer_list<QWidget *>{m_play, m_pause, m_stop, m_rewind}) m_transport->addWidget(w);
+    controlsLayout->addLayout(m_transport);
     if (side) {
-        auto *transport = new QHBoxLayout;
-        for (QWidget *w : std::initializer_list<QWidget *>{m_play, m_pause, m_stop, m_rewind}) transport->addWidget(w);
-        transport->addStretch();
-        controlsLayout->addLayout(transport);
+        m_transport->addStretch();
         auto *timing = new QHBoxLayout;
         timing->addWidget(durationLabel(false));
         timing->addWidget(m_duration);
@@ -1704,10 +1704,7 @@ AnimEditor::AnimEditor(TimelineHost *host, QUndoStack *undo, Layout layout, bool
         zoomRow->addStretch();
         controlsLayout->addLayout(zoomRow);
     } else { // narrow: three short rows
-        auto *r1 = new QHBoxLayout;
-        r1->setSpacing(3);
-        for (QWidget *w : std::initializer_list<QWidget *>{m_play, m_pause, m_stop, m_rewind}) r1->addWidget(w);
-        controlsLayout->addLayout(r1);
+        m_transport->setSpacing(3);
         auto *r2 = new QHBoxLayout;
         r2->addWidget(durationLabel(true));
         r2->addWidget(m_duration, 1);
