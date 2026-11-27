@@ -691,23 +691,8 @@ void FilterEditor::renameFilter(int index, const QString &name)
 std::pair<double, double> FilterEditor::spanAfter(const FilterChain &chain, double lo, double hi, size_t count)
 {
     std::pair<double, double> span{lo, hi};
-    for (size_t k = 0; k < chain.size() && k < count; ++k) {
-        const InteractionStage &f = chain[k];
-        if (!f.enabled) continue;
-        switch (f.kind) {
-        case InteractionFilter::Remap: span = {std::min(f.c, f.d), std::max(f.c, f.d)}; break;
-        case InteractionFilter::Clamp: span = {std::min(f.a, f.b), std::max(f.a, f.b)}; break;
-        case InteractionFilter::Curve:
-        case InteractionFilter::Steps:
-        case InteractionFilter::Threshold:
-        case InteractionFilter::Toggle:
-        case InteractionFilter::PulseDetection:
-        case InteractionFilter::Envelope:
-        case InteractionFilter::Speed:
-        case InteractionFilter::Physics: span = {0.0, 1.0}; break;
-        default: break;
-        }
-    }
+    for (size_t k = 0; k < chain.size() && k < count; ++k)
+        span = chain[k].outputSpan(span);
     return span;
 }
 

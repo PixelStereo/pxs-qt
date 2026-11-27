@@ -21,6 +21,7 @@
 
 #include <map>
 #include <memory>
+#include <set>
 #include <vector>
 
 namespace pxs::oscquery {
@@ -48,6 +49,7 @@ public:
     ~Devices() override;
 
     void startDiscovery(); // the OSCQuery devices of the network come and go
+    void setReferencedDevices(std::set<quint64> ids); // keep these discovered devices visible while absent
 
     std::vector<const Device *> all() const; // OSCQuery, OSC, DMX, MIDI, each by name
     const Device *find(quint64 id) const;
@@ -68,13 +70,17 @@ public:
     // The numbers of a device that can be driven: an OSCQuery device's leaves of one number that can be written, the others' addresses
     std::vector<ParamInfo> params(quint64 id) const;
     bool value(quint64 id, const QString &path, double *v) const; // the last one known (read from the device, or sent)
-    // Sends a value to an address of a device, as its kind and its address say. Sent again only when it changed (DMX: written in its
+    // Sends a value in the target protocol's units. Sent again only when it changed (DMX: written in its
     // universe, sent by the outputs). False: no such device or address, or it cannot be reached now
     bool send(quint64 id, const QString &path, double value);
     // To an OSC device, at any path, as `type` says (f, d, i, h, T): the address does not need to be declared. False: not an OSC device,
     // or not reachable now. Every value is sent (a stream of signals)
     bool sendTo(quint64 id, const QString &path, char type, double value);
     int sent() const { return m_sent; } // messages sent since the start (shown)
+
+    // Encoded 8- or 16-bit level in the current DMX universe buffer, when available.
+    std::optional<int> dmxLevel(quint64 id, const QString &path) const;
+    pxs::core::midi::Bytes midiOutput(quint64 id, const QString &path) const;
 
     // The DMX universes, by the application's numbering, 512 bytes each: what its DMX devices were last sent
     std::map<int, QByteArray> dmxUniverses() const { return m_universes; }
@@ -95,12 +101,15 @@ private:
     void openClient(quint64 id);
     void resolve(quint64 id);
     void found(const pxs::oscquery::Device &device);
+    bool announced(const Device &device) const;
     QString uniqueName(const Device &device) const;
 
     QString m_selfName;
     quint16 m_selfPort;
     pxs::core::device::Registry m_registry;
     std::map<quint64, std::unique_ptr<Link>> m_links;
+    std::set<std::string> m_announced;
+    std::set<quint64> m_referenced;
     std::map<QString, std::unique_ptr<pxs::midi::Output>> m_midi; // by port name
     std::map<int, QByteArray> m_universes;
     pxs::oscquery::Discovery *m_discovery = nullptr;

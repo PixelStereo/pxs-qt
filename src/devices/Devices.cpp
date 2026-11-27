@@ -57,6 +57,7 @@ struct Devices::Link {
     QHostAddress address;           // OSC: resolved
     bool ready = false;             // OSCQuery: its namespace is read
     QString error;                  // why it cannot be sent to
+    std::map<std::string, pxs::core::midi::Bytes> lastMidi;
 };
 
 Devices::Devices(const QString &selfName, quint16 selfPort, QObject *parent) : QObject(parent), m_selfName(selfName), m_selfPort(selfPort)
@@ -79,11 +80,15 @@ void Devices::startDiscovery()
     m_discovery = new pxs::oscquery::Discovery(this);
     connect(m_discovery, &pxs::oscquery::Discovery::deviceFound, this, [this](const pxs::oscquery::Device &d) { found(d); });
     connect(m_discovery, &pxs::oscquery::Discovery::deviceLost, this, [this](const pxs::oscquery::Device &lost) {
+        if (!m_announced.erase(utf8(lost.name))) return;
         for (const Device *d : m_registry.all())
             if (d->kind == Kind::OscQuery && !d->manual && text(d->name) == lost.name) {
-                link(d->id).ready = false;
-                link(d->id).error = QStringLiteral("Gone from the network");
+                auto &connection = link(d->id);
+                if (connection.client) connection.client->close();
+                connection.ready = false;
+                connection.error = QStringLiteral("Gone from the network");
                 emit changed();
+                break;
             }
     });
     m_discovery->start();
@@ -97,6 +102,7 @@ void Devices::found(const pxs::oscquery::Device &device)
         (m_selfPort && device.port == m_selfPort && (device.address.isLoopback() || QNetworkInterface::allAddresses().contains(device.address))))
         return;
     const QString host = device.address.isNull() ? device.host : device.address.toString();
+    const bool appeared = m_announced.insert(utf8(device.name)).second;
     for (const Device *d : m_registry.all())
         if (d->kind == Kind::OscQuery && !d->manual && text(d->name) == device.name) {
             if (text(d->host) != host || d->port != device.port || !link(d->id).client || !link(d->id).ready) {
@@ -106,6 +112,7 @@ void Devices::found(const pxs::oscquery::Device &device)
                 const auto id = m_registry.put(moved);
                 openClient(id);
             }
+            if (appeared) emit changed();
             return;
         }
     Device d;
@@ -124,6 +131,10 @@ void Devices::openClient(quint64 id)
     const Device *d = m_registry.find(id);
     if (!d || d->kind != Kind::OscQuery) return;
     Link &l = link(id);
+    if (!d->manual && !announced(*d)) {
+        l.error = QStringLiteral("Gone from the network");
+        return;
+    }
     if (!l.client) {
         l.client = std::make_unique<Client>();
         Client *c = l.client.get();
@@ -191,6 +202,7 @@ void Devices::connectDevice(quint64 id)
     m_registry.forgetSent(id);
     Link &l = link(id);
     l.error = text(d->validate());
+    l.lastMidi.clear();
     switch (d->kind) {
     case Kind::OscQuery: openClient(id); break;
     case Kind::Osc:
@@ -218,7 +230,29 @@ void Devices::connectDevice(quint64 id)
     }
 }
 
-std::vector<const Device *> Devices::all() const { return m_registry.all(); }
+bool Devices::announced(const Device &device) const { return m_announced.count(device.name) != 0; }
+
+void Devices::setReferencedDevices(std::set<quint64> ids)
+{
+    if (ids == m_referenced) return;
+    bool changedReferences = false;
+    for (const Device *device : m_registry.all())
+        if (device->kind == Kind::OscQuery && !device->manual && ids.count(device->id) != m_referenced.count(device->id)) {
+            changedReferences = true;
+            break;
+        }
+    m_referenced = std::move(ids);
+    if (changedReferences) emit changed();
+}
+
+std::vector<const Device *> Devices::all() const
+{
+    auto devices = m_registry.all();
+    devices.erase(std::remove_if(devices.begin(), devices.end(), [this](const Device *device) {
+        return device->kind == Kind::OscQuery && !device->manual && !announced(*device) && !m_referenced.count(device->id);
+    }), devices.end());
+    return devices;
+}
 
 const Device *Devices::find(quint64 id) const { return m_registry.find(id); }
 
@@ -367,8 +401,9 @@ std::vector<ParamInfo> Devices::params(quint64 id) const
         const bool onOff = d->kind == Kind::Osc && a.type == 'T';
         const bool whole = (d->kind == Kind::Osc && (a.type == 'i' || a.type == 'h')) || (d->kind == Kind::Midi && a.message == pxs::core::midi::Kind::ProgramChange);
         p.type = whole ? ParamInfo::Type::Int : ParamInfo::Type::Float;
-        p.min = p.lo = a.min;
-        p.max = p.hi = a.max;
+        const bool protocolUnits = d->kind == Kind::Dmx || d->kind == Kind::Midi;
+        p.min = p.lo = protocolUnits ? 0 : a.min;
+        p.max = p.hi = protocolUnits ? core::nativeMaximum(d->kind, a) : a.max;
         p.step = whole || onOff ? 1 : 0.01;
         p.animatable = true;
         out.push_back(p);
@@ -393,10 +428,31 @@ bool Devices::value(quint64 id, const QString &path, double *v) const
         return true;
     }
     if (const Address *a = d->address(utf8(path))) {
-        *v = a->min;
+        *v = d->kind == Kind::Osc ? a->min : 0;
         return true;
     }
     return false;
+}
+
+std::optional<int> Devices::dmxLevel(quint64 id, const QString &path) const
+{
+    const Device *device = m_registry.find(id);
+    if (!device || device->kind != Kind::Dmx) return std::nullopt;
+    const auto *address = device->address(utf8(path));
+    if (!address) return std::nullopt;
+    const auto [channel, width] = core::dmxChannels(*device, *address);
+    const auto universe = m_universes.find(device->universe);
+    if (!channel || universe == m_universes.end() || universe->second.size() < channel - 1 + width) return std::nullopt;
+    const auto coarse = static_cast<unsigned char>(universe->second.at(channel - 1));
+    return width == 2 ? (int(coarse) << 8) | static_cast<unsigned char>(universe->second.at(channel)) : int(coarse);
+}
+
+pxs::core::midi::Bytes Devices::midiOutput(quint64 id, const QString &path) const
+{
+    const auto link = m_links.find(id);
+    if (link == m_links.end()) return {};
+    const auto message = link->second->lastMidi.find(utf8(path));
+    return message == link->second->lastMidi.end() ? pxs::core::midi::Bytes{} : message->second;
 }
 
 bool Devices::send(quint64 id, const QString &path, double value)
@@ -404,18 +460,18 @@ bool Devices::send(quint64 id, const QString &path, double value)
     const Device *d = m_registry.find(id);
     if (!d || !std::isfinite(value)) return false;
     const std::string p = utf8(path);
+    const Address *address = d->address(p);
     if (d->kind == Kind::Dmx) {
-        const Address *a = d->address(p);
-        if (!a) return false;
+        if (!address) return false;
         QByteArray &u = m_universes[d->universe];
         if (u.size() != pxs::core::dmx::kChannelCount) u = QByteArray(pxs::core::dmx::kChannelCount, '\0');
         const QByteArray before = u;
-        if (!core::writeDmx(*d, *a, value, reinterpret_cast<std::uint8_t *>(u.data()), std::size_t(u.size()))) return false;
+        if (!core::writeDmx(*d, *address, value, reinterpret_cast<std::uint8_t *>(u.data()), std::size_t(u.size()))) return false;
         m_registry.changed(id, p, value);
         if (u != before) emit dmxChanged();
         return true;
     }
-    if (const auto last = m_registry.last(id, p); last && std::abs(*last - value) < 1e-9) return true; // the same: not again
+    if (const auto last = m_registry.last(id, p); d->kind != Kind::Midi && last && std::abs(*last - value) < 1e-9) return true; // the same: not again
     if (!online(id)) return false;
     bool done = false;
     if (d->kind == Kind::OscQuery) {
@@ -429,10 +485,12 @@ bool Devices::send(quint64 id, const QString &path, double value)
         if (!a) return false;
         done = m_udp.writeDatagram(bytes(pxs::core::osc::encode(core::oscMessage(*a, value))), m_links.at(id)->address, d->port) > 0;
     } else if (d->kind == Kind::Midi) {
-        const Address *a = d->address(p);
-        if (!a) return false;
-        const auto message = core::midiBytes(*d, *a, value);
+        if (!address) return false;
+        const auto message = core::midiBytes(*d, *address, value);
+        auto &last = link(id).lastMidi[p];
+        if (message == last) return true;
         if (!message.empty()) m_midi.at(text(d->midiPort))->send(message);
+        last = message;
         done = true;
     }
     if (done) {
@@ -451,7 +509,18 @@ bool Devices::sendTo(quint64 id, const QString &path, char type, double value)
     return true;
 }
 
-QJsonObject Devices::toJson() const { return QJsonDocument::fromJson(QByteArray::fromStdString(m_registry.toJson())).object(); }
+QJsonObject Devices::toJson() const
+{
+    auto json = QJsonDocument::fromJson(QByteArray::fromStdString(m_registry.toJson())).object();
+    QJsonArray remembered;
+    for (const auto id : m_referenced) {
+        const auto *device = m_registry.find(id);
+        if (device && device->kind == Kind::OscQuery && !device->manual)
+            remembered.append(QJsonDocument::fromJson(QByteArray::fromStdString(core::toJson(*device))).object());
+    }
+    json["remembered_oscquery"] = remembered;
+    return json;
+}
 
 bool Devices::fromJson(const QJsonObject &json)
 {
@@ -460,6 +529,13 @@ bool Devices::fromJson(const QJsonObject &json)
     m_links.clear();
     m_midi.clear();
     m_universes.clear();
+    for (const auto &entry : json.value("remembered_oscquery").toArray()) {
+        auto device = core::fromJson(QJsonDocument(entry.toObject()).toJson(QJsonDocument::Compact).toStdString());
+        if (!device || device->kind != Kind::OscQuery || device->name.empty() || announced(*device)) continue;
+        device->manual = false;
+        device->id = 0; // the registry restores its id by the discovery name
+        m_registry.put(std::move(*device));
+    }
     for (const Device *d : m_registry.all()) {
         connectDevice(d->id);
     }

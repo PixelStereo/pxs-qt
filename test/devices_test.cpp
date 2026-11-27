@@ -2,16 +2,21 @@
 // writes its universe on 8 and 16 bits; what was made is read back with its ids; the panel shows each kind
 #include <pxs/Devices.h>
 #include <pxs/DevicesPanel.h>
+#include <pxs/Discovery.h>
+#include <pxs/MdnsResponder.h>
 
 #include <OscCodec.h>
 
 #include <QApplication>
+#include <QCheckBox>
+#include <QLabel>
 #include <QElapsedTimer>
 #include <QFormLayout>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QSpinBox>
 #include <QTableWidget>
+#include <QTimer>
 #include <QUdpSocket>
 
 #include <cstdio>
@@ -117,13 +122,13 @@ static void dmxDevices()
     pan.path = "/pan";
     pan.channel = 2;
     pan.fine = true;
-    pan.min = -270;
-    pan.max = 270;
     spot.addresses = {dimmer, pan};
     const quint64 id = devices.add(spot);
     CHECK(devices.online(id));
     CHECK(devices.status(id) == QStringLiteral("Universe 2, channels 101–103"));
-    CHECK(devices.send(id, "/dimmer", 1) && devices.send(id, "/pan", 0));
+    CHECK(!devices.dmxLevel(id, "/dimmer"));
+    CHECK(devices.send(id, "/dimmer", 255) && devices.send(id, "/pan", 32768));
+    CHECK(devices.dmxLevel(id, "/dimmer") == 255 && devices.dmxLevel(id, "/pan") == 32768);
     const auto universes = devices.dmxUniverses();
     CHECK(universes.count(2) && universes.at(2).size() == 512);
     if (universes.count(2)) {
@@ -131,6 +136,8 @@ static void dmxDevices()
         CHECK(quint8(u[100]) == 255 && quint8(u[101]) == 128 && quint8(u[102]) == 0 && quint8(u[99]) == 0);
     }
     CHECK(told == 2);
+    CHECK(devices.send(id, "/dimmer", 1) && devices.dmxLevel(id, "/dimmer") == 1);
+
 
     // Moved to another start address: what it took is let go
     Device moved = *devices.find(id);
@@ -202,11 +209,61 @@ static void panel()
     panel.select(o);
     CHECK(panel.selected() == o && table && table->columnCount() == 4 && table->rowCount() == 1);
     panel.select(d);
-    CHECK(table && table->columnCount() == 5); // Address, Channel, 16 bits, Min, Max
+    CHECK(table && table->columnCount() == 4); // Address, Channel, 16 bits, Range
+    auto *range = table ? qobject_cast<QLabel *>(table->cellWidget(0, 3)) : nullptr;
+    auto *fine = table ? qobject_cast<QCheckBox *>(table->cellWidget(0, 2)) : nullptr;
+    CHECK(range && range->text() == QStringLiteral("0–255"));
+    CHECK(fine);
+    if (fine) fine->setChecked(true);
+    CHECK(range && range->text() == QStringLiteral("0–65535"));
 
     // An address renamed in the table is the device's
     if (table && table->item(0, 0)) table->item(0, 0)->setText(QStringLiteral("dimmer"));
     CHECK(devices.find(d) && devices.find(d)->addresses[0].path == "/dimmer");
+}
+
+static void discoveryLifecycle()
+{
+    Devices devices;
+    DevicesPanel panel(&devices);
+    auto *list = panel.findChild<QListWidget *>();
+    devices.startDiscovery();
+    auto *discovery = devices.findChild<pxs::oscquery::Discovery *>();
+    CHECK(list && discovery);
+    if (!list || !discovery) return;
+    discovery->stop(); // use only the packets below
+    const auto announcement = [](quint32 ttl) {
+        return pxs::MdnsResponder::buildResponse(QStringLiteral("PXS discovery lifecycle"), QStringLiteral("lifecycle-test.local"),
+            {{QStringLiteral("_oscjson._tcp"), 12345}}, {QHostAddress::LocalHost}, ttl);
+    };
+    discovery->handle(announcement(120));
+    CHECK(list->count() == 1);
+    const auto visible = devices.all();
+    if (visible.empty()) return;
+    const auto id = visible.front()->id;
+
+    discovery->handle(announcement(0));
+    CHECK(list->count() == 0);
+    discovery->handle(announcement(120));
+    CHECK(list->count() == 1 && devices.all().front()->id == id);
+    devices.setReferencedDevices({id});
+    discovery->handle(announcement(0));
+    CHECK(list->count() == 1 && !devices.online(id) && devices.status(id) == QStringLiteral("Gone from the network"));
+
+    Devices reopened;
+    CHECK(reopened.fromJson(devices.toJson()));
+    reopened.setReferencedDevices({id});
+    CHECK(reopened.all().size() == 1 && reopened.nameOf(id) == QStringLiteral("PXS discovery lifecycle") && !reopened.online(id));
+    devices.setReferencedDevices({});
+    CHECK(list->count() == 0);
+
+    discovery->handle(announcement(1));
+    CHECK(list->count() == 1);
+    QEventLoop wait;
+    QTimer::singleShot(1100, Qt::PreciseTimer, &wait, &QEventLoop::quit);
+    wait.exec();
+    discovery->handle({});
+    CHECK(list->count() == 0);
 }
 
 int main(int argc, char **argv)
@@ -216,6 +273,7 @@ int main(int argc, char **argv)
     dmxDevices();
     saved();
     panel();
+    discoveryLifecycle();
     if (failures) std::fprintf(stderr, "devices: %d check(s) failed\n", failures);
     else std::printf("devices: ok\n");
     return failures ? 1 : 0;

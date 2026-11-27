@@ -93,11 +93,11 @@ target_link_libraries(pxs_widgets PUBLIC Qt6::Widgets)
 # Interactions: a value driven from outside (a key, a MIDI controller, an OSC message, a signal) through a chain of
 # filters (remap, average, attack-release, curve, threshold, toggle, envelope…), with pick-up and an Action mode; the
 # graph of them. From NyxMap, where it is the Interaction panel's model. Qt Core only.
-add_library(pxs_interaction STATIC src/interaction/Interactions.cpp src/interaction/Anim.cpp src/interaction/TimelineHost.cpp src/interaction/pxs/TimelineHost.h src/interaction/Interactions.h
+add_library(pxs_interaction STATIC src/interaction/Interactions.cpp src/interaction/Anim.cpp src/interaction/TimelineHost.cpp src/interaction/TimelineTree.cpp src/interaction/TimelineTree.h src/interaction/pxs/TimelineHost.h src/interaction/Interactions.h
     src/interaction/InteractionGraph.h src/interaction/Anim.h src/interaction/OnsetAnalysis.h src/interaction/Published.h)
 add_library(pxs::interaction ALIAS pxs_interaction)
 target_include_directories(pxs_interaction PUBLIC src/interaction)
-target_link_libraries(pxs_interaction PUBLIC Qt6::Core pxs-core::timeline pxs-core::filter pxs::params)
+target_link_libraries(pxs_interaction PUBLIC Qt6::Core pxs-core::timeline pxs-core::filter pxs::params PRIVATE pxs-core::device)
 
 # Sequences, the cue lists of a show (from NyxMap): ordered steps that recall a snapshot or a preset or drive a timeline, played by GO,
 # with their waits, follows, groups, tracking and clocks. The application answers what a step needs (SequencerHost.h); the musical
@@ -124,7 +124,7 @@ add_library(pxs::presetview ALIAS pxs_presetview)
 set_target_properties(pxs_presetview PROPERTIES AUTOMOC ON POSITION_INDEPENDENT_CODE ON)
 target_include_directories(pxs_presetview PUBLIC src/presetview)
 target_link_libraries(pxs_sequenceview PRIVATE pxs::presetview)
-target_link_libraries(pxs_presetview PUBLIC pxs::tree pxs::params pxs::theme Qt6::Widgets)
+target_link_libraries(pxs_presetview PUBLIC pxs::interaction pxs::tree pxs::params pxs::theme Qt6::Widgets)
 
 # Expose an interface's own widgets (check box, number field, menu, text field, button) as parameters and messages
 add_library(pxs_bind STATIC src/bind/Bind.cpp src/bind/pxs/Bind.h)
@@ -199,8 +199,11 @@ target_link_libraries(pxs_dmxoutview PUBLIC pxs::dmxout Qt6::Widgets)
 # MIDI: the messages as interaction events (parse, build, learn), the ports and the inputs to listen to. The ports need an RtMidi,
 # which pxs does not carry: an application that has one (it may patch or vendor it) names its target before add_subdirectory,
 #   set(PXS_RTMIDI_TARGET rtmidi)
-# else a system RtMidi (find_package(RtMidi CONFIG)) is used when there is one. Without either, `available()` is false.
-if(NOT PXS_RTMIDI_TARGET)
+# Otherwise use the bundled backend when enabled in pxs-core, then try the system package.
+if(NOT PXS_RTMIDI_TARGET AND TARGET pxs-core::rtmidi)
+    set(PXS_RTMIDI_TARGET pxs-core::rtmidi)
+endif()
+if(NOT PXS_RTMIDI_TARGET AND NOT PXS_CORE_BUILD_RTMIDI)
     find_package(RtMidi CONFIG QUIET)
     if(TARGET RtMidi::rtmidi)
         set(PXS_RTMIDI_TARGET RtMidi::rtmidi)

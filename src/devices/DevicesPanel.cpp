@@ -38,12 +38,43 @@ QStringList columns(Kind kind)
 {
     switch (kind) {
     case Kind::Osc: return {QStringLiteral("Address"), QStringLiteral("Type"), QStringLiteral("Min"), QStringLiteral("Max")};
-    case Kind::Dmx: return {QStringLiteral("Address"), QStringLiteral("Channel"), QStringLiteral("16 bits"), QStringLiteral("Min"), QStringLiteral("Max")};
-    case Kind::Midi: return {QStringLiteral("Address"), QStringLiteral("Message"), QStringLiteral("Number"), QStringLiteral("Min"), QStringLiteral("Max")};
+    case Kind::Dmx: return {QStringLiteral("Address"), QStringLiteral("Channel"), QStringLiteral("16 bits"), QStringLiteral("Range")};
+    case Kind::Midi: return {QStringLiteral("Address"), QStringLiteral("Message"), QStringLiteral("Number"), QStringLiteral("Range")};
     case Kind::OscQuery: break;
     }
     return {};
 }
+
+class MidiPortBox : public QComboBox
+{
+public:
+    MidiPortBox()
+    {
+        setEditable(true);
+        setInsertPolicy(QComboBox::NoInsert);
+        lineEdit()->setPlaceholderText(QStringLiteral("First available output"));
+    }
+
+    void refreshPorts(const QString &selected)
+    {
+        const QSignalBlocker comboBlock(this);
+        const QSignalBlocker editBlock(lineEdit());
+        const auto outputs = pxs::midi::outputNames();
+        clear();
+        addItem(QString());
+        addItems(outputs);
+        if (!selected.isEmpty() && findText(selected) < 0) addItem(selected);
+        setCurrentIndex(findText(selected));
+        lineEdit()->setPlaceholderText(outputs.isEmpty() ? QStringLiteral("No MIDI output detected")
+                                                         : QStringLiteral("First available output"));
+    }
+
+    void showPopup() override
+    {
+        refreshPorts(currentText());
+        QComboBox::showPopup();
+    }
+};
 
 QComboBox *typeBox(char type)
 {
@@ -101,7 +132,6 @@ Device starter(Kind kind)
     case Kind::Dmx:
         d.name = "DMX fixture";
         a.path = "/dimmer";
-        a.max = 1;
         break;
     case Kind::Midi:
         d.name = "MIDI device";
@@ -178,10 +208,8 @@ DevicesPanel::DevicesPanel(Devices *devices, const QString &hint, QWidget *paren
     m_queryInfo = new QLabel;
     m_queryInfo->setWordWrap(true);
     m_queryInfo->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    auto *reread = new QPushButton(QStringLiteral("Read its namespace again"));
     qv->addWidget(m_queryTitle);
     qv->addWidget(m_queryInfo);
-    qv->addWidget(reread, 0, Qt::AlignLeft);
     qv->addStretch(1);
     m_pages->addWidget(query);
 
@@ -202,8 +230,7 @@ DevicesPanel::DevicesPanel(Devices *devices, const QString &hint, QWidget *paren
     m_universe->setToolTip(QStringLiteral("The application's universe: its DMX outputs say where it goes on the network"));
     m_start = wholeBox(1, 512, 1);
     m_start->setToolTip(QStringLiteral("The fixture's first channel in its universe"));
-    m_midiPort = new QComboBox;
-    m_midiPort->setEditable(true);
+    m_midiPort = new MidiPortBox;
     m_midiPort->setToolTip(QStringLiteral("The MIDI output (empty: the first one)"));
     m_channel = wholeBox(1, 16, 1);
     m_form->addRow(QStringLiteral("Name"), m_name);
@@ -217,6 +244,9 @@ DevicesPanel::DevicesPanel(Devices *devices, const QString &hint, QWidget *paren
     mv->addWidget(new QLabel(QStringLiteral("<b>Addresses</b> — what it takes")));
     m_addresses = new QTableWidget(0, 0);
     m_addresses->verticalHeader()->hide();
+    m_addresses->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
+    m_addresses->horizontalHeader()->setStretchLastSection(false);
+    m_addresses->horizontalHeader()->setCascadingSectionResizes(false);
     m_addresses->setSelectionBehavior(QAbstractItemView::SelectRows);
     mv->addWidget(m_addresses, 1);
     auto *rows = new QHBoxLayout;
@@ -234,12 +264,21 @@ DevicesPanel::DevicesPanel(Devices *devices, const QString &hint, QWidget *paren
     connect(remove, &QPushButton::clicked, this, [this] {
         if (const quint64 id = selected()) m_d->remove(id);
     });
-    connect(reread, &QPushButton::clicked, this, [this] {
-        if (const quint64 id = selected()) m_d->refresh(id);
+    m_list->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_list, &QListWidget::customContextMenuRequested, this, [this](const QPoint &point) {
+        const auto *item = m_list->itemAt(point);
+        if (!item) return;
+        const auto id = item->data(Qt::UserRole).toULongLong();
+        const auto *device = m_d->find(id);
+        if (!device || device->kind != Kind::OscQuery) return;
+        QMenu context(this);
+        context.addAction(QStringLiteral("Read namespace again"), this, [this, id] { m_d->refresh(id); });
+        context.exec(m_list->viewport()->mapToGlobal(point));
     });
     for (QLineEdit *e : {m_name, m_host}) connect(e, &QLineEdit::editingFinished, this, [this] { store(); });
     for (QSpinBox *b : {m_port, m_universe, m_start, m_channel}) connect(b, &QSpinBox::editingFinished, this, [this] { store(); });
-    connect(m_midiPort, &QComboBox::currentTextChanged, this, [this] { store(); });
+    connect(m_midiPort, &QComboBox::activated, this, [this] { store(); });
+    connect(m_midiPort->lineEdit(), &QLineEdit::editingFinished, this, [this] { store(); });
     connect(addAddress, &QPushButton::clicked, this, [this] {
         const Device *d = m_d->find(selected());
         if (!d || d->kind == Kind::OscQuery) return;
@@ -352,10 +391,7 @@ void DevicesPanel::showSelected()
     if (!m_start->hasFocus()) m_start->setValue(d->start);
     if (!m_channel->hasFocus()) m_channel->setValue(d->midiChannel);
     if (midi && !m_midiPort->hasFocus()) {
-        m_midiPort->clear();
-        m_midiPort->addItem(QString());
-        m_midiPort->addItems(pxs::midi::outputNames());
-        m_midiPort->setCurrentText(text(d->midiPort));
+        static_cast<MidiPortBox *>(m_midiPort)->refreshPorts(text(d->midiPort));
     }
     if (m_tableFor != d->id || m_tableKind != int(d->kind) || m_addresses->rowCount() != int(d->addresses.size())) fillTable();
     m_filling = false;
@@ -373,7 +409,6 @@ void DevicesPanel::fillTable()
     m_addresses->setRowCount(0);
     m_addresses->setColumnCount(int(heads.size()));
     m_addresses->setHorizontalHeaderLabels(heads);
-    m_addresses->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
     auto stored = [this](QWidget *w) {
         if (auto *c = qobject_cast<QComboBox *>(w)) connect(c, &QComboBox::currentIndexChanged, this, [this] { if (!m_filling) store(); });
         if (auto *n = qobject_cast<QDoubleSpinBox *>(w)) connect(n, &QDoubleSpinBox::editingFinished, this, [this] { store(); });
@@ -398,8 +433,12 @@ void DevicesPanel::fillTable()
             m_addresses->setCellWidget(row, c++, stored(messageBox(a.message)));
             m_addresses->setCellWidget(row, c++, stored(wholeBox(0, 127, a.number)));
         }
-        m_addresses->setCellWidget(row, c++, stored(numberBox(a.min)));
-        m_addresses->setCellWidget(row, c, stored(numberBox(a.max)));
+        if (d->kind == Kind::Osc) {
+            m_addresses->setCellWidget(row, c++, stored(numberBox(a.min)));
+            m_addresses->setCellWidget(row, c, stored(numberBox(a.max)));
+        } else {
+            m_addresses->setCellWidget(row, c, new QLabel(QStringLiteral("0–%1").arg(core::nativeMaximum(d->kind, a))));
+        }
     }
     m_filling = was;
 }
@@ -441,8 +480,12 @@ void DevicesPanel::store()
             if (auto *m = qobject_cast<QComboBox *>(m_addresses->cellWidget(row, c++))) a.message = pxs::core::midi::Kind(m->currentData().toInt());
             if (auto *n = qobject_cast<QSpinBox *>(m_addresses->cellWidget(row, c++))) a.number = n->value();
         }
-        if (auto *lo = qobject_cast<QDoubleSpinBox *>(m_addresses->cellWidget(row, c++))) a.min = lo->value();
-        if (auto *hi = qobject_cast<QDoubleSpinBox *>(m_addresses->cellWidget(row, c))) a.max = hi->value();
+        if (d->kind == Kind::Osc) {
+            if (auto *lo = qobject_cast<QDoubleSpinBox *>(m_addresses->cellWidget(row, c++))) a.min = lo->value();
+            if (auto *hi = qobject_cast<QDoubleSpinBox *>(m_addresses->cellWidget(row, c))) a.max = hi->value();
+        } else if (auto *label = qobject_cast<QLabel *>(m_addresses->cellWidget(row, c))) {
+            label->setText(QStringLiteral("0–%1").arg(core::nativeMaximum(d->kind, a)));
+        }
         edited.addresses.push_back(a);
     }
     if (edited == *d) return;
