@@ -1,7 +1,7 @@
 #pragma once
 // PresetView: manage and recall presets on a pxs::core::Tree (and optional scopes).
 // Left pane: library of presets (create, delete, duplicate, recall/GO).
-// Right pane: inspector showing the captured tree parameters with checkboxes to include/exclude parameters in the scope.
+// Right pane: captured parameter rows, with an edit mode for values, timing and membership.
 #include <pxs/core/tree/preset.h>
 #include <pxs/core/tree/tree.h>
 
@@ -35,7 +35,7 @@ public:
     // Returns available capture scopes: pair of (prefix path, display label)
     virtual std::vector<std::pair<QString, QString>> scopes() const
     {
-        return {{QStringLiteral(""), QStringLiteral("Tout l'arbre (Self)")}};
+        return {{QStringLiteral(""), QStringLiteral("All parameters")}};
     }
 };
 
@@ -51,7 +51,7 @@ public:
     ~PresetView() override;
 
     const std::vector<pxs::core::tree::Preset> &presets() const { return m_presets; }
-    void setRecaller(std::function<void(int)> recall) { m_recall = std::move(recall); }
+    void setRecaller(std::function<bool(int)> recall) { m_recall = std::move(recall); }
     void rebuildScopes();
     QWidget *inspector() const { return m_inspector; }
     void setPresets(const std::vector<pxs::core::tree::Preset> &presets);
@@ -73,14 +73,16 @@ private:
     void refreshPresetsList();
     void showPresetDetails(int index);
     void updateActivePresetFromLive();
-    void applyPresetTreeItemChange(QTreeWidgetItem *item, int column);
+    void createPreset(pxs::core::tree::Preset preset, const QString &name = {});
+    void chooseParameter();
+    void removeSelectedParameter();
 
     pxs::core::tree::Tree &m_tree;
     QUndoStack *m_undo;
     PresetHost *m_host;
     std::vector<pxs::core::tree::Preset> m_presets;
 
-    std::function<void(int)> m_recall;
+    std::function<bool(int)> m_recall;
     pxs::core::tree::PresetPlayback m_playback;
     QElapsedTimer m_recallClock;
     QTimer *m_playbackTimer;
@@ -96,11 +98,11 @@ private:
     QPushButton *m_updateBtn;
     QPushButton *m_recallBtn;
     QLabel *m_statusLabel;
+    QLabel *m_scopeSummary;
     QTreeWidget *m_paramsTree;
-    QPushButton *m_checkAllBtn;
-    QPushButton *m_uncheckAllBtn;
-
-    bool m_updatingTree = false;
+    QPushButton *m_editBtn;
+    QPushButton *m_addParameter;
+    QPushButton *m_removeParameter;
 };
 
 } // namespace pxs::presetview

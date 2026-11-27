@@ -55,10 +55,10 @@ class SequenceView : public QWidget
 public:
     SequenceView(Sequencer &sequencer, SequenceViewHost *host, QUndoStack *undo, QWidget *parent = nullptr);
 
-    void rebuild();
+    void rebuild(); // Refresh the steps and their available targets.
     void inspectStep(int row);
     QWidget *stepInspector(int row, QWidget *parent);
-    void setInspectorSink(std::function<void(QWidget *)> sink) { m_inspectorSink = std::move(sink); } // the rows again: the steps, and the timelines they can drive (call it when those change)
+    void setInspectorSink(std::function<void(QWidget *)> sink) { m_inspectorSink = std::move(sink); }
 
     // The time of a step as the list shows it: 2.5 under a minute, 1:05.0 beyond, ∞ endless
     static QString seconds(double t);
@@ -66,6 +66,7 @@ public:
 private:
     Sequencer::Sequence sequence() const;
     void refresh();      // the step played, the one on standby, the times of the steps on their way
+    void scheduleInspectorUpdate();
     void store();        // the rows, as edited, to the sequence (an undo step)
     void apply(const Sequencer::Sequence &after, const QString &text);
     bool typing() const; // a step being edited: Space and Escape are not GO and Stop all
@@ -83,6 +84,7 @@ private:
     QLabel *m_next, *m_state;
     std::function<void(QWidget *)> m_inspectorSink;
     bool m_filling = false;
+    bool m_inspectorUpdatePending = false;
 };
 
 } // namespace pxs::sequenceview

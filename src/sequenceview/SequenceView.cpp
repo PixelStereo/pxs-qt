@@ -198,10 +198,12 @@ SequenceView::SequenceView(Sequencer &sequencer, SequenceViewHost *host, QUndoSt
     m_table->setItemDelegate(new StepDelegate(m_table));
     m_table->setHorizontalHeaderLabels({QStringLiteral("Step"), QStringLiteral("Pre-wait"), QStringLiteral("Does"), QStringLiteral("Timeline"),
                                         QStringLiteral("Value"), QStringLiteral("Post-wait"), QStringLiteral("Then")});
-    m_table->horizontalHeader()->setSectionResizeMode(TextColumn, QHeaderView::Stretch);
-    m_table->horizontalHeader()->setSectionResizeMode(TimelineColumn, QHeaderView::Stretch);
+    m_table->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
+    m_table->horizontalHeader()->setStretchLastSection(false);
+    m_table->horizontalHeader()->setCascadingSectionResizes(false);
     for (const auto &[c, w] : std::initializer_list<std::pair<int, int>>{
-             {PreWaitColumn, 66}, {ActionColumn, 80}, {ValueColumn, 58}, {PostWaitColumn, 66}, {NextColumn, 53}})
+             {TextColumn, 112}, {PreWaitColumn, 66}, {ActionColumn, 80}, {TimelineColumn, 108},
+             {ValueColumn, 58}, {PostWaitColumn, 66}, {NextColumn, 53}})
         m_table->setColumnWidth(c, w);
     m_table->horizontalHeaderItem(NextColumn)->setToolTip(QStringLiteral("GO: the next step waits for GO. AUTO: it follows once this one's "
                                                                          "action and post-wait are over. Double-click to flip"));
@@ -296,9 +298,11 @@ SequenceView::SequenceView(Sequencer &sequencer, SequenceViewHost *host, QUndoSt
         if (!m_filling) QTimer::singleShot(0, this, [this] { store(); }); // not from inside the item's own change
     });
 
-    connect(m_table, &QTableWidget::cellClicked, this, [this](int row, int) {
-        if (m_inspectorSink) m_inspectorSink(stepInspector(row, nullptr));
+    connect(m_table, &QTableWidget::currentCellChanged, this, [this](int row, int, int previousRow, int) {
+        if (row != previousRow) scheduleInspectorUpdate();
     });
+    // Clicking the current row brings its inspector back after selecting another panel.
+    connect(m_table, &QTableWidget::cellClicked, this, [this] { scheduleInspectorUpdate(); });
     connect(&m_seq, &Sequencer::changed, this, [this] { rebuild(); });
     connect(&m_seq, &Sequencer::positionChanged, this, [this] { refresh(); });
     auto *poll = new QTimer(this); // the steps on their way
@@ -453,6 +457,17 @@ SetSequence::SetSequence(Sequencer &seq, int index, const Sequencer::Sequence &b
 void SetSequence::redo() { m_seq.setSequence(m_index, m_after); }
 void SetSequence::undo() { m_seq.setSequence(m_index, m_before); }
 
+void SequenceView::scheduleInspectorUpdate()
+{
+    if (m_filling || !m_inspectorSink || m_inspectorUpdatePending) return;
+    m_inspectorUpdatePending = true;
+    QTimer::singleShot(0, this, [this] {
+        m_inspectorUpdatePending = false;
+        const int row = m_table->currentRow();
+        if (row >= 0 && m_inspectorSink) m_inspectorSink(stepInspector(row, nullptr));
+    });
+}
+
 void SequenceView::inspectStep(int row)
 {
     if (m_inspectorSink) {
@@ -505,7 +520,10 @@ QWidget *SequenceView::stepInspector(int row, QWidget *parent)
         form->addRow(QStringLiteral("Default fade (s)"), fade);
         auto *tree = new QTreeWidget;
         tree->setHeaderLabels({QStringLiteral("Parameter"), QStringLiteral("Value"), QStringLiteral("Time (s)"), QStringLiteral("Delay (s)"), QStringLiteral("Curve")});
-        tree->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+        tree->header()->setSectionResizeMode(QHeaderView::Interactive);
+        tree->header()->setStretchLastSection(false);
+        tree->header()->setCascadingSectionResizes(false);
+        tree->header()->resizeSection(0, 140);
         for (int i = 1; i <= 4; ++i) tree->header()->resizeSection(i, 72);
         auto *duration = new QLabel;
         const auto update = [step, preset, fade, duration] {

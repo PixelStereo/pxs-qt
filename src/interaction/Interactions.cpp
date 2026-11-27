@@ -264,6 +264,24 @@ static AnimTrack curveFromJson(const QJsonArray &a)
     return curve;
 }
 
+std::pair<double, double> InteractionStage::outputSpan(std::pair<double, double> input) const
+{
+    if (!enabled) return input;
+    switch (kind) {
+    case InteractionFilter::Remap: return {std::min(c, d), std::max(c, d)};
+    case InteractionFilter::Clamp: return {std::min(a, b), std::max(a, b)};
+    case InteractionFilter::Curve:
+    case InteractionFilter::Steps:
+    case InteractionFilter::Threshold:
+    case InteractionFilter::Toggle:
+    case InteractionFilter::PulseDetection:
+    case InteractionFilter::Envelope:
+    case InteractionFilter::Speed:
+    case InteractionFilter::Physics: return {0.0, 1.0};
+    default: return input;
+    }
+}
+
 QJsonObject InteractionStage::toJson() const
 {
     QJsonObject o{{"type", interactionFilterKey(kind)}};

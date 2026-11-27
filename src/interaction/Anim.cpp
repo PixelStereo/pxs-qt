@@ -1,8 +1,10 @@
 // The timelines' logic is pxs-core's (pxs/core/timeline/timeline.h); Anim.h is its Qt face. Here: how a timeline is saved (the keys of
 // NyxMap's projects, which read back the same).
 #include "Anim.h"
+#include "Interactions.h"
 
 #include <QJsonObject>
+#include <cmath>
 
 void sortAnimKeys(AnimTrack &t)
 {
@@ -42,8 +44,14 @@ AnimLoop animLoopFromKey(const QString &k) { return AnimLoop(keyIndex(kLoopKeys,
 
 // What drives a number (a timeline's track, or a layer's animation), into a JSON object: its keys
 // [t, v, curve, "current", {"in": [dt, dv], "out": [dt, dv]}] (all but t and v when they matter) and its oscillator
+void appendTrackRemap(AnimTrack &track, double inMin, double inMax, double outMin, double outMax)
+{
+    track.dataFilters.append(InteractionStage::remap(inMin, inMax, outMin, outMax).toJson());
+}
+
 void animTrackToJson(const AnimTrack &t, QJsonObject &o)
 {
+    if (t.unitCurve) o["unit_curve"] = true;
     if (!t.dataFilters.isEmpty()) o["data_filters"] = t.dataFilters;
     if (t.isPoint()) {
         o["type"] = QStringLiteral("point2d");
@@ -103,6 +111,7 @@ void animTrackToJson(const AnimTrack &t, QJsonObject &o)
 void animTrackFromJson(AnimTrack &t, const QJsonObject &o, double duration)
 {
     t.dataFilters = o.value("data_filters").toArray();
+    t.unitCurve = o.value("unit_curve").toBool();
     t.axes.clear();
     if (o.value("type").toString() == QLatin1String("point2d")) {
         t.color = false;
@@ -199,4 +208,74 @@ void animTransportFromJson(Animation &a, const QJsonObject &o)
     a.loop = animLoopFromKey(o.value("loop").toString());
     a.repeat = std::clamp(o.value("repeat").toInt(0), 0, 100000);
     a.speed = std::clamp(o.value("speed").toDouble(1.0), 0.0, 10.0);
+}
+
+
+QJsonObject animationDefinitionToJson(const Animation &animation)
+{
+    QJsonObject definition{{"id", double(animation.id)}, {"name", animation.name}};
+    animTransportToJson(animation, definition);
+    QJsonArray tracks;
+    for (const auto &track : animation.tracks) {
+        QJsonObject data;
+        animTrackToJson(track, data);
+        data["name"] = track.name;
+        data["slug"] = QString::fromStdString(track.slug);
+        data["holder"] = double(track.layer);
+        data["path"] = track.param;
+        tracks.append(data);
+    }
+    definition["tracks"] = tracks;
+    return definition;
+}
+
+std::optional<Animation> animationDefinitionFromJson(const QJsonObject &definition)
+{
+    const double identity = definition.value("id").toDouble();
+    if (!(identity >= 1 && identity <= 9007199254740991.0 && std::floor(identity) == identity)
+        || !definition.value("tracks").isArray()) return std::nullopt;
+    Animation animation;
+    animation.id = quint64(identity);
+    animation.name = definition.value("name").toString();
+    animTransportFromJson(animation, definition);
+    for (const auto &value : definition.value("tracks").toArray()) {
+        const auto data = value.toObject();
+        const double holder = data.value("holder").toDouble(0);
+        if (!data.value("path").isString() || !(holder >= 0 && holder <= 9007199254740991.0 && std::floor(holder) == holder))
+            return std::nullopt;
+        AnimTrack track;
+        track.name = data.value("name").toString();
+        track.slug = data.value("slug").toString().toStdString();
+        track.layer = quint64(holder);
+        track.param = data.value("path").toString();
+        animTrackFromJson(track, data, animation.duration);
+        animation.tracks.push_back(std::move(track));
+    }
+    return animation;
+}
+
+
+QJsonObject animationSnapshotToJson(const Animation &animation)
+{
+    auto snapshot = animationDefinitionToJson(animation);
+    const char *state = animation.state == AnimState::Playing ? "playing"
+        : animation.state == AnimState::Paused ? "paused" : "stopped";
+    snapshot["transport"] = QJsonObject{{"state", QString::fromLatin1(state)}, {"clock", animation.clock},
+        {"oscillator_offset", animation.oscillatorOffset}, {"reversed", animation.reversed}};
+    return snapshot;
+}
+
+std::optional<Animation> animationSnapshotFromJson(const QJsonObject &snapshot)
+{
+    auto animation = animationDefinitionFromJson(snapshot);
+    const auto transport = snapshot.value("transport").toObject();
+    if (!animation || transport.isEmpty()) return std::nullopt;
+    const auto state = transport.value("state").toString();
+    if (state == QStringLiteral("playing")) animation->state = AnimState::Playing;
+    else if (state == QStringLiteral("paused")) animation->state = AnimState::Paused;
+    else if (state != QStringLiteral("stopped")) return std::nullopt;
+    animation->clock = std::clamp(transport.value("clock").toDouble(), 0.0, animation->length());
+    animation->oscillatorOffset = transport.value("oscillator_offset").toDouble();
+    animation->reversed = transport.value("reversed").toBool();
+    return animation;
 }

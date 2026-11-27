@@ -2,7 +2,10 @@
 #include <pxs/TimelineEditor.h>
 
 #include <QApplication>
+#include <QCheckBox>
 #include <QComboBox>
+#include <QMouseEvent>
+#include <QSlider>
 #include <QDoubleSpinBox>
 #include <QPushButton>
 
@@ -19,6 +22,14 @@ namespace {
 class Host : public TimelineHost
 {
 public:
+    std::vector<double> filterValues;
+    bool animationFilterSignal(quint64, quint64, const QString &, double *input, std::vector<double> *after) const override
+    {
+        if (filterValues.empty()) return false;
+        *input = 0.5;
+        *after = filterValues;
+        return true;
+    }
     std::vector<ParamInfo> animatableParams(quint64) const override
     {
         ParamInfo p;
@@ -132,9 +143,95 @@ int main(int argc, char **argv)
     CHECK(params.size() == 1 && params.front().path == "level");
     CHECK(animWaveName(AnimWave::Square) == "Step (square)");
 
+    // Overlay selection changes the editable lane without writing to either curve.
+    t.oscillator = true;
+    t.center = 2;
+    t.amplitude = 0;
+    auto other = t;
+    other.center = 8;
+    timeline.tracks = {t, other};
+    editor.reload();
+    app.processEvents();
+    auto *overlay = editor.findChild<QCheckBox *>("overlayTracks");
+    auto *picker = editor.findChild<QComboBox *>("overlayEditTrack");
+    auto *clickSelect = editor.findChild<QCheckBox *>("overlayClickSelect");
+    CHECK(overlay && picker && clickSelect);
+    if (overlay && picker && clickSelect) {
+        overlay->setChecked(true);
+        app.processEvents();
+        const auto editorLane = [&]() -> pxs::curveview::CurveLane * {
+            pxs::curveview::CurveLane *visible = nullptr;
+            for (auto *lane : editor.findChildren<pxs::curveview::CurveLane *>())
+                if (lane->isVisibleTo(&editor)) {
+                    CHECK(!visible);
+                    visible = lane;
+                }
+            return visible;
+        };
+        const auto clickValue = [&](double value) {
+            auto *lane = editorLane();
+            CHECK(lane);
+            if (!lane) return;
+            const double lo = t.center - 1e-6, hi = other.center + 1e-6;
+            const QPointF point(lane->width() / 2., 8 + (hi - value) / (hi - lo) * (lane->height() - 16));
+            QMouseEvent event(QEvent::MouseButtonPress, point, lane->mapToGlobal(point.toPoint()),
+                              Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+            QApplication::sendEvent(lane, &event);
+            app.processEvents();
+        };
+        const int before = editor.stores;
+        picker->setCurrentIndex(1);
+        CHECK(editorLane() && editorLane()->track().center == 8);
+        clickValue(2);
+        CHECK(picker->currentIndex() == 0);
+        clickSelect->setChecked(false);
+        clickValue(8);
+        CHECK(picker->currentIndex() == 0 && editor.stores == before);
+    }
+
+    // The unfiltered meter is present without a filter, on the curve's own scale.
+    t.center = 0.5;
+    t.amplitude = 0.5;
+    timeline.tracks = {t};
+    editor.reload();
+    app.processEvents();
+    const auto visibleMeters = [&](const QString &name) {
+        QList<QSlider *> visible;
+        for (auto *meter : editor.findChildren<QSlider *>(name))
+            if (meter->isVisibleTo(&editor)) visible.append(meter);
+        return visible;
+    };
+    editor.poll();
+    auto outputs = visibleMeters(QStringLiteral("animationTimelineSignal"));
+    CHECK(outputs.size() == 1 && outputs.front()->value() == 500);
+    CHECK(outputs.size() == 1 && outputs.front()->accessibleDescription() == QStringLiteral("Range: 0 to 1"));
+    CHECK(visibleMeters(QStringLiteral("animationFilterSignal")).empty());
+
+    appendTrackRemap(timeline.tracks[0], 0, 1, 0, 255);
+    auto clamp = InteractionStage::made(InteractionFilter::Clamp);
+    clamp.a = 0;
+    clamp.b = 200;
+    timeline.tracks[0].dataFilters.append(clamp.toJson());
+    host.filterValues = {127.5, 127.5};
+    editor.reload();
+    app.processEvents();
+    editor.poll();
+    outputs = visibleMeters(QStringLiteral("animationTimelineSignal"));
+    CHECK(outputs.size() == 1 && outputs.front()->value() == 500);
+    const auto filters = visibleMeters(QStringLiteral("animationFilterSignal"));
+    CHECK(filters.size() == 2);
+    if (filters.size() == 2) {
+        CHECK(filters[0]->accessibleDescription() == QStringLiteral("Range: 0 to 255"));
+        CHECK(filters[0]->value() == 500);
+        CHECK(filters[1]->accessibleDescription() == QStringLiteral("Range: 0 to 200"));
+        CHECK(filters[1]->value() == 638);
+    }
+
     // Navigate by timeline position even when a ping-pong pass runs backwards.
-    timeline.tracks.front().oscillator = false;
-    timeline.tracks.front().keys = {{1, 2}, {4, 3}, {6, 2}};
+    t.oscillator = false;
+    t.keys = {{1, 2}, {4, 3}, {6, 2}};
+    timeline.tracks = {t};
+    timeline.duration = 7;
     AnimTrack disabled = timeline.tracks.front();
     disabled.enabled = false;
     disabled.keys = {{3, 2}};

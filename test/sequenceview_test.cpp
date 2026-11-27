@@ -5,6 +5,10 @@
 #include <QComboBox>
 #include <QDragEnterEvent>
 #include <QDropEvent>
+#include <QHeaderView>
+#include <QKeyEvent>
+#include <QLineEdit>
+#include <QMouseEvent>
 #include <QMimeData>
 #include <QPushButton>
 #include <QTableWidget>
@@ -68,6 +72,20 @@ int main(int argc, char **argv)
               pxs::sequenceview::SequenceView::seconds(65) == QLatin1String("1:05.0"),
           "its pre-wait, as the list shows times");
 
+    auto *header = table->horizontalHeader();
+    const int oldStepWidth = header->sectionSize(0);
+    const int oldWaitWidth = header->sectionSize(1);
+    const QPointF handle(header->sectionViewportPosition(0) + oldStepWidth - 1, header->height() / 2);
+    const auto mouse = [&](QEvent::Type type, const QPointF &point, Qt::MouseButton button, Qt::MouseButtons buttons) {
+        QMouseEvent event(type, point, header->viewport()->mapToGlobal(point.toPoint()), button, buttons, Qt::NoModifier);
+        QApplication::sendEvent(header->viewport(), &event);
+    };
+    mouse(QEvent::MouseButtonPress, handle, Qt::LeftButton, Qt::LeftButton);
+    mouse(QEvent::MouseMove, handle + QPointF(22, 0), Qt::NoButton, Qt::LeftButton);
+    mouse(QEvent::MouseButtonRelease, handle + QPointF(22, 0), Qt::LeftButton, Qt::NoButton);
+    check(header->sectionSize(0) == oldStepWidth + 22 && header->sectionSize(1) == oldWaitWidth,
+          "dragging the separator resizes only its column");
+
     // A timeline dragged below the last cue is inserted as an undoable step.
     QMimeData timelineDrag;
     timelineDrag.setData("application/x-pxs-timeline", QByteArray("6"));
@@ -104,6 +122,29 @@ int main(int argc, char **argv)
     s.steps.push_back(b);
     seq.setSequence(0, s);
     view.rebuild();
+    QString inspected;
+    int inspections = 0;
+    view.setInspectorSink([&](QWidget *details) {
+        const auto *name = details->findChild<QLineEdit *>();
+        inspected = name ? name->text() : QString();
+        ++inspections;
+        delete details;
+    });
+    table->setCurrentCell(0, 0);
+    QApplication::processEvents();
+    const auto press = [&](int key) {
+        QKeyEvent event(QEvent::KeyPress, key, Qt::NoModifier);
+        QApplication::sendEvent(table, &event);
+        QApplication::processEvents();
+    };
+    press(Qt::Key_Down);
+    check(table->currentRow() == 1 && inspected == QLatin1String("Outro"), "Down shows the next step in the inspector");
+    const int beforeRight = inspections;
+    press(Qt::Key_Right);
+    check(inspections == beforeRight, "moving within the same row keeps the inspector");
+    press(Qt::Key_Up);
+    check(table->currentRow() == 0 && inspected == QLatin1String("Intro"), "Up shows the previous step in the inspector");
+
     check(seq.position() == 0 && seq.next() == 1, "next is 1 after playing 0");
     check(seq.loadAsNext(0, 0), "loadAsNext succeeds");
     check(seq.next() == 0, "loadAsNext sets next to 0");
