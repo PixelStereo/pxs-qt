@@ -21,6 +21,7 @@
 
 #include <map>
 #include <memory>
+#include <set>
 #include <vector>
 
 namespace pxs::oscquery {
@@ -48,6 +49,7 @@ public:
     ~Devices() override;
 
     void startDiscovery(); // the OSCQuery devices of the network come and go
+    void setReferencedDevices(std::set<quint64> ids); // keep these discovered devices visible while absent
 
     std::vector<const Device *> all() const; // OSCQuery, OSC, DMX, MIDI, each by name
     const Device *find(quint64 id) const;
@@ -99,12 +101,15 @@ private:
     void openClient(quint64 id);
     void resolve(quint64 id);
     void found(const pxs::oscquery::Device &device);
+    bool announced(const Device &device) const;
     QString uniqueName(const Device &device) const;
 
     QString m_selfName;
     quint16 m_selfPort;
     pxs::core::device::Registry m_registry;
     std::map<quint64, std::unique_ptr<Link>> m_links;
+    std::set<std::string> m_announced;
+    std::set<quint64> m_referenced;
     std::map<QString, std::unique_ptr<pxs::midi::Output>> m_midi; // by port name
     std::map<int, QByteArray> m_universes;
     pxs::oscquery::Discovery *m_discovery = nullptr;

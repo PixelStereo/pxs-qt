@@ -1,6 +1,7 @@
 #pragma once
 // Finds the OSCQuery devices of the local network (multicast DNS / DNS-SD, "_oscjson._tcp"): asks for them now and every few seconds,
-// and tells when one appears, or says goodbye. The counterpart of MdnsResponder, which announces.
+// and tells when one appears, says goodbye or its announcement expires. The counterpart of MdnsResponder, which announces.
+#include <QDeadlineTimer>
 #include <QHash>
 #include <QHostAddress>
 #include <QList>
@@ -52,7 +53,8 @@ signals:
 private:
     void ask();
     void onReadyRead();
-    void resolve(const QString &instance);
+    void forget(const QString &instance);
+    void expire();
 
     QUdpSocket m_socket;
     QTimer m_timer;
@@ -60,6 +62,7 @@ private:
     bool m_running = false;
     QHash<QString, Device> m_devices;       // by instance name (lower case)
     QHash<QString, DnsRecord> m_srv;        // instance -> its SRV
+    QHash<QString, QDeadlineTimer> m_expirations;
     QHash<QString, QList<QHostAddress>> m_hosts; // host -> every address heard, in the order they came
     static QHostAddress bestAddress(const QList<QHostAddress> &heard); // routable before link-local, stable among equals
     QHash<QString, QString> m_names;        // instance (lower case) -> the name as announced

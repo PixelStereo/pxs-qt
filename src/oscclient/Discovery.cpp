@@ -3,6 +3,7 @@
 #include <pxs/MdnsResponder.h>
 
 #include <QtEndian>
+#include <algorithm>
 
 namespace pxs::oscquery {
 
@@ -107,6 +108,7 @@ QByteArray Discovery::query(const QString &serviceType)
 
 void Discovery::ask()
 {
+    expire();
     QByteArray q = query(m_type.chopped(6));
     if (m_socket.localPort() != kMdnsPort) {
         // Legacy unicast mDNS queries use an ephemeral source port and a nonzero transaction ID.
@@ -179,6 +181,21 @@ QHostAddress Discovery::bestAddress(const QList<QHostAddress> &heard)
     return heard.isEmpty() ? QHostAddress() : heard.first();
 }
 
+void Discovery::forget(const QString &instance)
+{
+    m_srv.remove(instance);
+    m_names.remove(instance);
+    m_expirations.remove(instance);
+    const auto gone = m_devices.take(instance);
+    if (!gone.name.isEmpty()) emit deviceLost(gone);
+}
+
+void Discovery::expire()
+{
+    for (const auto &instance : m_expirations.keys())
+        if (m_expirations.value(instance).hasExpired()) forget(instance);
+}
+
 void Discovery::handle(const QByteArray &packet)
 {
     const QString type = m_type.isEmpty() ? QStringLiteral("_oscjson._tcp.local") : m_type;
@@ -187,15 +204,21 @@ void Discovery::handle(const QByteArray &packet)
         if (r.type == TypePTR && r.name.compare(type, Qt::CaseInsensitive) == 0) {
             const QString key = r.target.toLower();
             if (r.ttl == 0) { // goodbye
-                m_srv.remove(key);
-                const Device gone = m_devices.take(key);
-                if (!gone.name.isEmpty()) emit deviceLost(gone);
+                forget(key);
                 continue;
             }
             m_names.insert(key, r.target);
-        } else if (r.type == TypeSRV && r.ttl > 0) {
-            m_srv.insert(r.name.toLower(), r);
-            m_names.insert(r.name.toLower(), r.name);
+            if (const auto srv = m_srv.constFind(key); srv != m_srv.cend())
+                m_expirations.insert(key, QDeadlineTimer(qint64(std::min(r.ttl, srv->ttl)) * 1000));
+        } else if (r.type == TypeSRV && r.name.endsWith(type, Qt::CaseInsensitive)) {
+            const auto key = r.name.toLower();
+            if (r.ttl == 0) {
+                forget(key);
+                continue;
+            }
+            m_srv.insert(key, r);
+            m_names.insert(key, r.name);
+            m_expirations.insert(key, QDeadlineTimer(qint64(r.ttl) * 1000));
         } else if (r.type == TypeA && r.ttl > 0) {
             // A host answers on each interface with that interface's address (a phone plugged in by USB adds a 169.254.x.x one):
             // all are kept, the best is chosen below, so the device does not flip between them as the answers come.
@@ -203,6 +226,7 @@ void Discovery::handle(const QByteArray &packet)
             if (!heard.contains(r.address)) heard.append(r.address);
         }
     }
+    expire();
     for (auto it = m_srv.cbegin(); it != m_srv.cend(); ++it) {
         if (!it.key().endsWith(type.toLower())) continue;
         const auto host = m_hosts.constFind(it.value().target.toLower());

@@ -80,11 +80,15 @@ void Devices::startDiscovery()
     m_discovery = new pxs::oscquery::Discovery(this);
     connect(m_discovery, &pxs::oscquery::Discovery::deviceFound, this, [this](const pxs::oscquery::Device &d) { found(d); });
     connect(m_discovery, &pxs::oscquery::Discovery::deviceLost, this, [this](const pxs::oscquery::Device &lost) {
+        if (!m_announced.erase(utf8(lost.name))) return;
         for (const Device *d : m_registry.all())
             if (d->kind == Kind::OscQuery && !d->manual && text(d->name) == lost.name) {
-                link(d->id).ready = false;
-                link(d->id).error = QStringLiteral("Gone from the network");
+                auto &connection = link(d->id);
+                if (connection.client) connection.client->close();
+                connection.ready = false;
+                connection.error = QStringLiteral("Gone from the network");
                 emit changed();
+                break;
             }
     });
     m_discovery->start();
@@ -98,6 +102,7 @@ void Devices::found(const pxs::oscquery::Device &device)
         (m_selfPort && device.port == m_selfPort && (device.address.isLoopback() || QNetworkInterface::allAddresses().contains(device.address))))
         return;
     const QString host = device.address.isNull() ? device.host : device.address.toString();
+    const bool appeared = m_announced.insert(utf8(device.name)).second;
     for (const Device *d : m_registry.all())
         if (d->kind == Kind::OscQuery && !d->manual && text(d->name) == device.name) {
             if (text(d->host) != host || d->port != device.port || !link(d->id).client || !link(d->id).ready) {
@@ -107,6 +112,7 @@ void Devices::found(const pxs::oscquery::Device &device)
                 const auto id = m_registry.put(moved);
                 openClient(id);
             }
+            if (appeared) emit changed();
             return;
         }
     Device d;
@@ -125,6 +131,10 @@ void Devices::openClient(quint64 id)
     const Device *d = m_registry.find(id);
     if (!d || d->kind != Kind::OscQuery) return;
     Link &l = link(id);
+    if (!d->manual && !announced(*d)) {
+        l.error = QStringLiteral("Gone from the network");
+        return;
+    }
     if (!l.client) {
         l.client = std::make_unique<Client>();
         Client *c = l.client.get();
@@ -220,7 +230,29 @@ void Devices::connectDevice(quint64 id)
     }
 }
 
-std::vector<const Device *> Devices::all() const { return m_registry.all(); }
+bool Devices::announced(const Device &device) const { return m_announced.count(device.name) != 0; }
+
+void Devices::setReferencedDevices(std::set<quint64> ids)
+{
+    if (ids == m_referenced) return;
+    bool changedReferences = false;
+    for (const Device *device : m_registry.all())
+        if (device->kind == Kind::OscQuery && !device->manual && ids.count(device->id) != m_referenced.count(device->id)) {
+            changedReferences = true;
+            break;
+        }
+    m_referenced = std::move(ids);
+    if (changedReferences) emit changed();
+}
+
+std::vector<const Device *> Devices::all() const
+{
+    auto devices = m_registry.all();
+    devices.erase(std::remove_if(devices.begin(), devices.end(), [this](const Device *device) {
+        return device->kind == Kind::OscQuery && !device->manual && !announced(*device) && !m_referenced.count(device->id);
+    }), devices.end());
+    return devices;
+}
 
 const Device *Devices::find(quint64 id) const { return m_registry.find(id); }
 
@@ -477,7 +509,18 @@ bool Devices::sendTo(quint64 id, const QString &path, char type, double value)
     return true;
 }
 
-QJsonObject Devices::toJson() const { return QJsonDocument::fromJson(QByteArray::fromStdString(m_registry.toJson())).object(); }
+QJsonObject Devices::toJson() const
+{
+    auto json = QJsonDocument::fromJson(QByteArray::fromStdString(m_registry.toJson())).object();
+    QJsonArray remembered;
+    for (const auto id : m_referenced) {
+        const auto *device = m_registry.find(id);
+        if (device && device->kind == Kind::OscQuery && !device->manual)
+            remembered.append(QJsonDocument::fromJson(QByteArray::fromStdString(core::toJson(*device))).object());
+    }
+    json["remembered_oscquery"] = remembered;
+    return json;
+}
 
 bool Devices::fromJson(const QJsonObject &json)
 {
@@ -486,6 +529,13 @@ bool Devices::fromJson(const QJsonObject &json)
     m_links.clear();
     m_midi.clear();
     m_universes.clear();
+    for (const auto &entry : json.value("remembered_oscquery").toArray()) {
+        auto device = core::fromJson(QJsonDocument(entry.toObject()).toJson(QJsonDocument::Compact).toStdString());
+        if (!device || device->kind != Kind::OscQuery || device->name.empty() || announced(*device)) continue;
+        device->manual = false;
+        device->id = 0; // the registry restores its id by the discovery name
+        m_registry.put(std::move(*device));
+    }
     for (const Device *d : m_registry.all()) {
         connectDevice(d->id);
     }
