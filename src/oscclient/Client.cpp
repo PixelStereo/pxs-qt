@@ -247,7 +247,7 @@ osc::Message Client::toMessage(const RemoteNode &node, const QJsonArray &values)
     osc::Message m;
     m.address = node.path;
     m.types = node.type;
-    if (node.type == QLatin1String("N")) return m;
+    if (node.isMomentaryAction()) return m;
     for (int k = 0; k < node.type.size(); ++k) {
         const QChar tag = node.type[k];
         const QJsonValue v = k < values.size() ? values[k] : QJsonValue();
@@ -270,10 +270,11 @@ bool Client::write(const QString &path, const QJsonArray &values)
 {
     const RemoteNode *n = m_tree.find(path);
     if (m_state != State::Ready || !n || n->type.isEmpty() || !(n->access & 2) || !m_oscPort) return false;
-    if (n->type != QLatin1String("N") && values.size() != n->type.size()) return false;
+    const bool action = n->isMomentaryAction();
+    if (!action && values.size() != n->type.size()) return false;
     if (m_udp.state() == QAbstractSocket::UnconnectedState) m_udp.bind(QHostAddress::AnyIPv4, 0);
     const bool sent = m_udp.writeDatagram(osc::encode(toMessage(*n, values)), m_address, m_oscPort) >= 0;
-    if (sent && (n->access & 1)) { // what it holds now, as far as this client knows (a device that pushes will confirm)
+    if (sent && !action && (n->access & 1)) { // what it holds now, as far as this client knows (a device that pushes will confirm)
         m_tree.setValue(path, values);
     }
     return sent;
