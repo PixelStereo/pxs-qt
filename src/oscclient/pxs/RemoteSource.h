@@ -25,7 +25,7 @@ public:
     bool setJson(quint64, const QString &path, const QJsonValue &v) override
     {
         const RemoteNode *n = m_client->tree().find(path);
-        if (n && n->type == QLatin1String("N")) return m_client->write(path, {});
+        if (n && n->isMomentaryAction()) return m_client->write(path, {});
         return m_client->write(path, QJsonArray{v});
     }
 
