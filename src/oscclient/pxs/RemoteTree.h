@@ -31,6 +31,7 @@ struct RemoteNode {
     bool isContainer() const { return !hasValue(); }
     bool isLeaf() const { return hasValue(); }
     // As one parameter: false when it has no type or several arguments (a leaf of one argument only)
+    bool isMomentaryAction() const;
     bool toParamInfo(core::tree::ParamInfo *out) const;
 };
 

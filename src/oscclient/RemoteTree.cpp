@@ -125,6 +125,11 @@ QStringList RemoteTree::leaves() const
     return out;
 }
 
+bool RemoteNode::isMomentaryAction() const
+{
+    return core::tree::isMomentaryAction(convert::toUtf8(type), access);
+}
+
 bool RemoteNode::toParamInfo(core::tree::ParamInfo *out) const
 {
     core::tree::RemoteNode c;
