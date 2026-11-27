@@ -1614,6 +1614,13 @@ AnimEditor::AnimEditor(TimelineHost *host, QUndoStack *undo, Layout layout, bool
     v->setSpacing(side ? 6 : 4);
     m_main->addWidget(m_body, 1);
 
+    auto *controls = new QWidget(m_body);
+    auto *controlsLayout = new QVBoxLayout(controls);
+    controlsLayout->setContentsMargins(0, 0, 0, 0);
+    controlsLayout->setSpacing(v->spacing());
+    m_controls = controlsLayout;
+    v->addWidget(controls);
+
     // Transport, duration, speed, loop
     m_play = new QPushButton(QStringLiteral("▶ PLAY"));
     m_pause = new QPushButton(side ? QStringLiteral("❚❚ Pause") : QStringLiteral("❚❚"));
@@ -1665,14 +1672,14 @@ AnimEditor::AnimEditor(TimelineHost *host, QUndoStack *undo, Layout layout, bool
         auto *transport = new QHBoxLayout;
         for (QWidget *w : std::initializer_list<QWidget *>{m_play, m_pause, m_stop, m_rewind}) transport->addWidget(w);
         transport->addStretch();
-        v->addLayout(transport);
+        controlsLayout->addLayout(transport);
         auto *timing = new QHBoxLayout;
         timing->addWidget(durationLabel(false));
         timing->addWidget(m_duration);
         timing->addWidget(speedLabel(false));
         timing->addWidget(m_speed);
         timing->addStretch();
-        v->addLayout(timing);
+        controlsLayout->addLayout(timing);
         // The zoom: time (all the lanes) and values (each lane its own; the slider sets them all)
         auto *zoomRow = new QHBoxLayout;
         m_zoomX = new QSlider(Qt::Horizontal);
@@ -1688,25 +1695,25 @@ AnimEditor::AnimEditor(TimelineHost *host, QUndoStack *undo, Layout layout, bool
         zoomRow->addWidget(m_loop);
         zoomRow->addWidget(m_repeat);
         zoomRow->addStretch();
-        v->addLayout(zoomRow);
+        controlsLayout->addLayout(zoomRow);
         zoomRow = new QHBoxLayout;
         zoomRow->addWidget(gray(QStringLiteral("Values")));
         zoomRow->addWidget(m_zoomY);
         zoomRow->addWidget(m_fit);
         zoomRow->addWidget(m_all);
         zoomRow->addStretch();
-        v->addLayout(zoomRow);
+        controlsLayout->addLayout(zoomRow);
     } else { // narrow: three short rows
         auto *r1 = new QHBoxLayout;
         r1->setSpacing(3);
         for (QWidget *w : std::initializer_list<QWidget *>{m_play, m_pause, m_stop, m_rewind}) r1->addWidget(w);
-        v->addLayout(r1);
+        controlsLayout->addLayout(r1);
         auto *r2 = new QHBoxLayout;
         r2->addWidget(durationLabel(true));
         r2->addWidget(m_duration, 1);
         r2->addWidget(speedLabel(true));
         r2->addWidget(m_speed, 1);
-        v->addLayout(r2);
+        controlsLayout->addLayout(r2);
         auto *r3 = new QHBoxLayout;
         r3->addWidget(m_loop, 1);
         r3->addWidget(m_repeat);
@@ -1715,7 +1722,7 @@ AnimEditor::AnimEditor(TimelineHost *host, QUndoStack *undo, Layout layout, bool
             b->setFixedWidth(40);
             r3->addWidget(b);
         }
-        v->addLayout(r3);
+        controlsLayout->addLayout(r3);
     }
 
     if (side) {
@@ -1733,7 +1740,7 @@ AnimEditor::AnimEditor(TimelineHost *host, QUndoStack *undo, Layout layout, bool
         overlayOptions->addWidget(m_pickCurve);
         m_editTrack->hide();
         m_pickCurve->hide();
-        v->addLayout(overlayOptions);
+        controlsLayout->addLayout(overlayOptions);
         connect(m_overlay, &QCheckBox::toggled, this, &AnimEditor::updateOverlay);
         connect(m_pickCurve, &QCheckBox::toggled, this, &AnimEditor::updateOverlay);
         connect(m_editTrack, &QComboBox::currentIndexChanged, this, &AnimEditor::updateOverlay);
@@ -1796,7 +1803,7 @@ AnimEditor::AnimEditor(TimelineHost *host, QUndoStack *undo, Layout layout, bool
     m_totalTime->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
     m_totalTime->setStyleSheet(QStringLiteral("color:#b9b9c5;"));
     playbackLayout->addLayout(readouts);
-    v->addWidget(playback);
+    controlsLayout->addWidget(playback);
 
     const int bar = scrollTracks ? style()->pixelMetric(QStyle::PM_ScrollBarExtent) : 0; // the lanes' scroll bar
     auto *rulerRow = new QHBoxLayout;
