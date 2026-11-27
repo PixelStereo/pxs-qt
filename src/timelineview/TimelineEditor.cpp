@@ -1673,7 +1673,23 @@ AnimEditor::AnimEditor(TimelineHost *host, QUndoStack *undo, Layout layout, bool
         "QSlider::groove:horizontal { height:6px; border:1px solid #6a6a77; border-radius:3px; background:#202027; }"
         "QSlider::sub-page:horizontal { background:#4cd964; border-radius:3px; }"
         "QSlider::handle:horizontal { width:12px; margin:-5px 0; background:#e6e6ed; border:1px solid #9a9aa7; border-radius:3px; }"));
-    playbackLayout->addWidget(m_position);
+    auto *scrub = new QHBoxLayout;
+    scrub->setSpacing(4);
+    auto *previousKey = new QPushButton(QStringLiteral("‹"));
+    auto *nextKey = new QPushButton(QStringLiteral("›"));
+    auto *goToTime = new QPushButton(QStringLiteral("Go to…"));
+    previousKey->setAccessibleName(QStringLiteral("Previous keyframe"));
+    nextKey->setAccessibleName(QStringLiteral("Next keyframe"));
+    for (auto *button : {previousKey, nextKey}) {
+        button->setToolTip(button->accessibleName());
+        button->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    }
+    goToTime->setToolTip(QStringLiteral("Seek to a precise time within this pass"));
+    scrub->addWidget(previousKey);
+    scrub->addWidget(m_position, 1);
+    scrub->addWidget(nextKey);
+    scrub->addWidget(goToTime);
+    playbackLayout->addLayout(scrub);
     auto *readouts = new QHBoxLayout;
     readouts->setSpacing(6);
     m_time = new QLabel(QStringLiteral("00:00.00"));
@@ -1705,7 +1721,6 @@ AnimEditor::AnimEditor(TimelineHost *host, QUndoStack *undo, Layout layout, bool
     rulerRow->setSpacing(0);
     rulerRow->addSpacing(headerWidth());
     m_ruler = new TimeRuler;
-    m_ruler->setToolTip(QStringLiteral("Pan time with Shift + scroll or a middle-button drag."));
     rulerRow->addWidget(m_ruler, 1);
     rulerRow->addSpacing(bar);
     v->addLayout(rulerRow);
@@ -1742,18 +1757,54 @@ AnimEditor::AnimEditor(TimelineHost *host, QUndoStack *undo, Layout layout, bool
     connect(m_pause, &QPushButton::clicked, this, [this] { control(AnimAction::Pause); });
     connect(m_stop, &QPushButton::clicked, this, [this] { control(AnimAction::Stop); });
     connect(m_rewind, &QPushButton::clicked, this, [this] { control(AnimAction::Rewind); });
-    connect(m_position, &QSlider::valueChanged, this, [this](int value) {
-        Animation a;
-        if (!fetch(&a)) return;
-        const double t = a.duration * (double(value) / kPlaybackSteps);
-        control(AnimAction::Seek, playbackClockAt(a, t));
+    const auto seek = [this](const Animation &a, double position) {
+        control(AnimAction::Seek, playbackClockAt(a, std::clamp(position, 0.0, a.duration)));
         poll();
+    };
+    connect(m_position, &QSlider::valueChanged, this, [this, seek](int value) {
+        Animation a;
+        if (fetch(&a)) seek(a, a.duration * value / kPlaybackSteps);
     });
-    connect(m_ruler, &TimeRuler::seekRequested, this, [this](double t) {
-        // Within the pass shown: from the pass it is in
+    connect(m_ruler, &TimeRuler::seekRequested, this, [this, seek](double position) {
+        Animation a;
+        if (fetch(&a)) seek(a, position);
+    });
+    const auto adjacentKey = [this, seek](bool forward) {
         Animation a;
         if (!fetch(&a)) return;
-        control(AnimAction::Seek, playbackClockAt(a, t));
+        const double position = a.position();
+        double best = std::numeric_limits<double>::infinity();
+        double target = position;
+        const auto consider = [&](const auto &keys) {
+            for (const auto &key : keys) {
+                const double distance = forward ? key.t - position : position - key.t;
+                if (distance > 1e-6 && distance < best) {
+                    best = distance;
+                    target = key.t;
+                }
+            }
+        };
+        for (const auto &track : a.tracks) {
+            if (!track.enabled || track.oscillator) continue;
+            if (track.isPoint()) {
+                for (const auto &axis : track.axes)
+                    if (axis.enabled) consider(axis.keys);
+            } else {
+                consider(track.keys);
+            }
+        }
+        if (std::isfinite(best)) seek(a, target);
+    };
+    connect(previousKey, &QPushButton::clicked, this, [adjacentKey] { adjacentKey(false); });
+    connect(nextKey, &QPushButton::clicked, this, [adjacentKey] { adjacentKey(true); });
+    connect(goToTime, &QPushButton::clicked, this, [this, seek] {
+        Animation a;
+        if (!fetch(&a)) return;
+        bool accepted = false;
+        const double position = QInputDialog::getDouble(this, QStringLiteral("Go to Time"), QStringLiteral("Time (s)"),
+                                                         a.position(), 0, a.duration, 3, &accepted);
+        const auto id = a.id;
+        if (accepted && fetch(&a) && a.id == id) seek(a, position);
     });
     connect(m_duration, &QDoubleSpinBox::valueChanged, this, [this](double d) {
         if (m_filling) return;

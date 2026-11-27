@@ -199,8 +199,11 @@ target_link_libraries(pxs_dmxoutview PUBLIC pxs::dmxout Qt6::Widgets)
 # MIDI: the messages as interaction events (parse, build, learn), the ports and the inputs to listen to. The ports need an RtMidi,
 # which pxs does not carry: an application that has one (it may patch or vendor it) names its target before add_subdirectory,
 #   set(PXS_RTMIDI_TARGET rtmidi)
-# else a system RtMidi (find_package(RtMidi CONFIG)) is used when there is one. Without either, `available()` is false.
-if(NOT PXS_RTMIDI_TARGET)
+# Otherwise use the bundled backend when enabled in pxs-core, then try the system package.
+if(NOT PXS_RTMIDI_TARGET AND TARGET pxs-core::rtmidi)
+    set(PXS_RTMIDI_TARGET pxs-core::rtmidi)
+endif()
+if(NOT PXS_RTMIDI_TARGET AND NOT PXS_CORE_BUILD_RTMIDI)
     find_package(RtMidi CONFIG QUIET)
     if(TARGET RtMidi::rtmidi)
         set(PXS_RTMIDI_TARGET RtMidi::rtmidi)
