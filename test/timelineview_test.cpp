@@ -4,6 +4,7 @@
 #include <QApplication>
 #include <QComboBox>
 #include <QDoubleSpinBox>
+#include <QPushButton>
 
 #include <cstdio>
 
@@ -43,6 +44,7 @@ public:
     Editor(TimelineHost *host, Animation *timeline) : AnimEditor(host, nullptr, Layout::Side, false), m_timeline(timeline) {}
     int stores = 0;
     std::vector<AnimAction> actions;
+    double lastTime = 0;
 
 protected:
     bool fetchPlayback(AnimationPlayback *a) const override
@@ -67,7 +69,11 @@ protected:
         *m_timeline = after;
         ++stores;
     }
-    void control(AnimAction action, double) override { actions.push_back(action); }
+    void control(AnimAction action, double time) override
+    {
+        actions.push_back(action);
+        lastTime = time;
+    }
 
 private:
     Animation *m_timeline;
@@ -125,6 +131,31 @@ int main(int argc, char **argv)
     const auto params = animationMenuParams(&host, 0);
     CHECK(params.size() == 1 && params.front().path == "level");
     CHECK(animWaveName(AnimWave::Square) == "Step (square)");
+
+    // Navigate by timeline position even when a ping-pong pass runs backwards.
+    timeline.tracks.front().oscillator = false;
+    timeline.tracks.front().keys = {{1, 2}, {4, 3}, {6, 2}};
+    AnimTrack disabled = timeline.tracks.front();
+    disabled.enabled = false;
+    disabled.keys = {{3, 2}};
+    timeline.tracks.push_back(disabled);
+    timeline.loop = AnimLoop::PingPong;
+    timeline.state = AnimState::Paused;
+    timeline.clock = 12; // second pass, at 2 s of a 7 s timeline
+    editor.reload();
+    QPushButton *next = nullptr;
+    QPushButton *previous = nullptr;
+    for (auto *button : editor.findChildren<QPushButton *>()) {
+        if (button->accessibleName() == "Next keyframe") next = button;
+        if (button->accessibleName() == "Previous keyframe") previous = button;
+    }
+    CHECK(next && previous);
+    if (next && previous) {
+        next->click();
+        CHECK(!editor.actions.empty() && editor.actions.back() == AnimAction::Seek && editor.lastTime == 10);
+        previous->click();
+        CHECK(!editor.actions.empty() && editor.actions.back() == AnimAction::Seek && editor.lastTime == 13);
+    }
 
     if (failures) std::fprintf(stderr, "timelineview: %d check(s) failed\n", failures);
     else std::printf("timelineview: ok\n");
