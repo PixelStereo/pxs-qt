@@ -166,7 +166,8 @@ int main(int argc, char **argv)
             auto *lane = editorLane();
             CHECK(lane);
             if (!lane) return;
-            const QPointF point(lane->width() / 2., 8 + (1 - value / 10.) * (lane->height() - 16));
+            const double lo = t.center - 1e-6, hi = other.center + 1e-6;
+            const QPointF point(lane->width() / 2., 8 + (hi - value) / (hi - lo) * (lane->height() - 16));
             QMouseEvent event(QEvent::MouseButtonPress, point, lane->mapToGlobal(point.toPoint()),
                               Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
             QApplication::sendEvent(lane, &event);

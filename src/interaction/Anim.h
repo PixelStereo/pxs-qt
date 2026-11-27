@@ -38,6 +38,8 @@ using AnimKey = pxs::core::timeline::Key;
 inline double easeCurve(double t, int curve) { return pxs::core::timeline::ease(t, curve); }
 
 struct AnimTrack {
+    QString name;     // display name, independent of the destination
+    std::string slug; // stable address segment
     quint64 layer = 0; // the layer driven (its id; 0: the composition)
     QString param;     // the number (see Engine::animatableParams): "opacity", "spatial/rotation", "fx/<fx>/param/<name>"…
     bool enabled = true;

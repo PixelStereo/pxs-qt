@@ -1,10 +1,9 @@
 #pragma once
 // PresetView: manage and recall presets on a pxs::core::Tree (and optional scopes).
 // Left pane: library of presets (create, delete, duplicate, recall/GO).
-// Right pane: inspector showing the captured tree parameters with checkboxes to include/exclude parameters in the scope.
+// Right pane: captured parameter rows, with an edit mode for values, timing and membership.
 #include <pxs/core/tree/preset.h>
 #include <pxs/core/tree/tree.h>
-#include <Anim.h>
 
 #include <QWidget>
 #include <QElapsedTimer>
@@ -33,20 +32,12 @@ class PresetHost
 {
 public:
     virtual ~PresetHost() = default;
-    virtual pxs::core::tree::Tree *deviceParameters() const { return nullptr; }
-    virtual std::vector<std::pair<quint64, QString>> timelineScopes() const { return {}; }
-    virtual std::optional<Animation> readTimeline(quint64) const { return std::nullopt; }
-    virtual void restoreTimeline(const Animation &) {}
     // Returns available capture scopes: pair of (prefix path, display label)
     virtual std::vector<std::pair<QString, QString>> scopes() const
     {
-        return {{QStringLiteral(""), QStringLiteral("Tout l'arbre (Self)")}};
+        return {{QStringLiteral(""), QStringLiteral("All parameters")}};
     }
 };
-
-std::optional<std::vector<Animation>> prepareTimelines(const pxs::core::tree::Preset &preset,
-    const std::function<bool(quint64)> &exists);
-void addTimelineDetails(QTreeWidget &tree, const pxs::core::tree::Preset &preset);
 
 void addParameterEditors(QTreeWidget &tree, QTreeWidgetItem &item, const std::string &path,
                          const pxs::core::tree::Preset &base, pxs::core::tree::Preset &edits,
@@ -82,7 +73,9 @@ private:
     void refreshPresetsList();
     void showPresetDetails(int index);
     void updateActivePresetFromLive();
-    void applyPresetTreeItemChange(QTreeWidgetItem *item, int column);
+    void createPreset(pxs::core::tree::Preset preset, const QString &name = {});
+    void chooseParameter();
+    void removeSelectedParameter();
 
     pxs::core::tree::Tree &m_tree;
     QUndoStack *m_undo;
@@ -90,7 +83,7 @@ private:
     std::vector<pxs::core::tree::Preset> m_presets;
 
     std::function<bool(int)> m_recall;
-    pxs::core::tree::PresetPlayback m_playback, m_devicePlayback;
+    pxs::core::tree::PresetPlayback m_playback;
     QElapsedTimer m_recallClock;
     QTimer *m_playbackTimer;
     QWidget *m_inspector;
@@ -107,10 +100,9 @@ private:
     QLabel *m_statusLabel;
     QLabel *m_scopeSummary;
     QTreeWidget *m_paramsTree;
-    QPushButton *m_checkAllBtn;
-    QPushButton *m_uncheckAllBtn;
-
-    bool m_updatingTree = false;
+    QPushButton *m_editBtn;
+    QPushButton *m_addParameter;
+    QPushButton *m_removeParameter;
 };
 
 } // namespace pxs::presetview

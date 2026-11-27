@@ -219,6 +219,8 @@ QJsonObject animationDefinitionToJson(const Animation &animation)
     for (const auto &track : animation.tracks) {
         QJsonObject data;
         animTrackToJson(track, data);
+        data["name"] = track.name;
+        data["slug"] = QString::fromStdString(track.slug);
         data["holder"] = double(track.layer);
         data["path"] = track.param;
         tracks.append(data);
@@ -242,6 +244,8 @@ std::optional<Animation> animationDefinitionFromJson(const QJsonObject &definiti
         if (!data.value("path").isString() || !(holder >= 0 && holder <= 9007199254740991.0 && std::floor(holder) == holder))
             return std::nullopt;
         AnimTrack track;
+        track.name = data.value("name").toString();
+        track.slug = data.value("slug").toString().toStdString();
         track.layer = quint64(holder);
         track.param = data.value("path").toString();
         animTrackFromJson(track, data, animation.duration);

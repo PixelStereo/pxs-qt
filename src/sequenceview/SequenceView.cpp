@@ -549,7 +549,6 @@ QWidget *SequenceView::stepInspector(int row, QWidget *parent)
                 } else item = new QTreeWidgetItem(tree, {QString::fromStdString(path)});
                 pxs::presetview::addParameterEditors(*tree, *item, path, preset, step->presetOverrides, step->fadeOverride, true, update);
             }
-            pxs::presetview::addTimelineDetails(*tree, preset);
         };
         populate();
         connect(fade, &QLineEdit::editingFinished, panel, [update, populate] { update(); populate(); });

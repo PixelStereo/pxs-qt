@@ -29,6 +29,8 @@ void declareFields(core::tree::Tree &tree, const std::string &path, const AnimTr
             field->range(-1e6, 1e6).limits(-limit, limit);
             if (set) field->byDefault(get(layout));
         }
+        if (relative.rfind("target/", 0) == 0 || relative == "curve/keys" || relative == "filters/definition")
+            field->presetValue(false);
         if (configure) configure(*field);
         field->bind([read, get] {
             const auto *track = read();
@@ -178,6 +180,17 @@ void declareFields(core::tree::Tree &tree, const std::string &path, const AnimTr
         parameter(stem + "/enabled", "Enabled", Parameter::Type::Bool,
                   [filter](const auto &t) { return Value(filter(t).enabled); },
                   [change](auto &t, const auto &v) { change(t, [&v](auto &f) { f.enabled = v.truthy(); }); });
+        if (configured.kind == InteractionFilter::Math) {
+            parameter(stem + "/operator", "Operator", Parameter::Type::Choice,
+                      [filter](const auto &t) { return Value(pxs::core::filter::key(filter(t).op)); },
+                      [change](auto &t, const auto &v) {
+                          change(t, [&v](auto &f) { f.op = pxs::core::filter::mathOpFromKey(v.text()).value_or(f.op); });
+                      }, [](Parameter &p) {
+                          std::vector<std::string> choices;
+                          for (int op = 0; op < kMathOpCount; ++op) choices.emplace_back(pxs::core::filter::key(MathOp(op)));
+                          p.choices(std::move(choices));
+                      });
+        }
         for (int field = 0; field < kFilterSettingCount; ++field) {
             const auto setting = interactionFilterSetting(configured.kind, field);
             if (setting.name.isEmpty()) continue;
@@ -206,7 +219,7 @@ void declareFields(core::tree::Tree &tree, const std::string &path, const AnimTr
 
 bool sameFields(const AnimTrack &a, const AnimTrack &b)
 {
-    if (a.layer != b.layer || a.param != b.param || a.axes.size() != b.axes.size() ||
+    if (a.slug != b.slug || a.name != b.name || a.layer != b.layer || a.param != b.param || a.axes.size() != b.axes.size() ||
         a.keys.size() != b.keys.size() || a.color != b.color || a.event != b.event || a.dataFilters.size() != b.dataFilters.size())
         return false;
     for (int i = 0; i < a.dataFilters.size(); ++i) {
@@ -234,19 +247,41 @@ std::string claimSegment(std::string_view label, std::set<std::string> &used)
     return segment;
 }
 
+void nameTracks(Animation &animation, const std::set<std::string> &reserved)
+{
+    std::set<std::string> addresses;
+    std::set<std::string> names;
+    for (auto &track : animation.tracks) {
+        if (!track.slug.empty() && (core::device::namespaceSegment(track.slug) != track.slug || !addresses.insert(track.slug).second))
+            track.slug.clear();
+        auto name = track.name.simplified();
+        if (name.isEmpty()) {
+            name = track.param.section(QLatin1Char('/'), -1).trimmed();
+            name.replace(QLatin1Char('-'), QLatin1Char(' ')).replace(QLatin1Char('_'), QLatin1Char(' '));
+            if (!name.isEmpty()) name[0] = name[0].toUpper();
+        }
+        if (name.isEmpty()) name = QStringLiteral("Track");
+        name = name.left(32).trimmed();
+        const auto base = core::device::namespaceSegment(name.toStdString());
+        const auto unique = claimSegment(base, names);
+        if (unique != base) name += QStringLiteral(" ") + QString::fromStdString(unique.substr(base.size() + 1)).toUpper();
+        track.name = name;
+    }
+    addresses.insert(reserved.begin(), reserved.end());
+    for (auto &track : animation.tracks)
+        if (track.slug.empty()) track.slug = claimSegment(track.name.toStdString(), addresses);
+}
+
 std::vector<std::string> declareTrackTree(core::tree::Tree &tree, const std::string &path,
     const Animation &layout, const std::function<const Animation *()> &read,
     const std::function<void(size_t, AnimTrack)> &write,
-    const std::function<std::string(const AnimTrack &)> &label,
     const std::function<double(size_t)> &output)
 {
     tree.add(path).label = "Tracks";
-    std::set<std::string> used;
     std::vector<std::string> paths;
     for (size_t i = 0; i < layout.tracks.size(); ++i) {
-        const auto title = label(layout.tracks[i]);
-        auto trackPath = path + "/" + claimSegment(title, used);
-        tree.add(trackPath).label = title;
+        auto trackPath = path + "/" + layout.tracks[i].slug;
+        tree.add(trackPath).label = layout.tracks[i].name.toStdString();
         declareFields(tree, trackPath, layout.tracks[i], [read, i]() -> const AnimTrack * {
             const auto *animation = read();
             return animation && i < animation->tracks.size() ? &animation->tracks[i] : nullptr;

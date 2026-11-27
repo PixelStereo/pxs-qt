@@ -1,5 +1,4 @@
 #include "pxs/PresetView.h"
-#include <Interactions.h>
 
 #include <QComboBox>
 #include <QDoubleSpinBox>
@@ -22,6 +21,7 @@
 #include <QTreeWidget>
 #include <QTreeWidgetItem>
 #include <QVBoxLayout>
+#include <cmath>
 
 namespace pxs::presetview {
 
@@ -66,92 +66,16 @@ QString formatJsonValue(const std::string &jsonText)
     return QString::fromStdString(jsonText);
 }
 
-void collectHoldablePaths(const pxs::core::tree::Node &n, const std::string &prefix, std::vector<std::string> &out)
+QString labelFor(const pxs::core::tree::Tree &tree, const std::string &path)
 {
-    if (n.kind() == pxs::core::tree::Kind::Parameter && n.access == 3 && n.get && n.set) {
-        if (!n.parameter() || n.parameter()->isStored()) {
-            if (prefix.empty() || n.path() == prefix || n.path().rfind(prefix + "/", 0) == 0) out.push_back(n.path());
-        }
-    }
-    for (const auto &c : n.children()) collectHoldablePaths(*c.second, prefix, out);
+    if (const auto *node = tree.find(path); node && !node->label.empty())
+        return QString::fromStdString(node->label);
+    auto text = QString::fromStdString(path.substr(path.rfind('/') + 1)).replace(QLatin1Char('-'), QLatin1Char(' '));
+    if (!text.isEmpty()) text[0] = text[0].toUpper();
+    return text;
 }
 
 } // namespace
-
-namespace {
-const QString kTimelinesScope = QStringLiteral("timelines");
-const QString kTimelineScope = QStringLiteral("timeline:");
-
-std::optional<Animation> readDefinition(const std::string &text)
-{
-    return animationSnapshotFromJson(QJsonDocument::fromJson(QByteArray::fromStdString(text)).object());
-}
-
-std::string writeDefinition(const Animation &animation)
-{
-    return QJsonDocument(animationSnapshotToJson(animation)).toJson(QJsonDocument::Compact).toStdString();
-}
-
-void showTrack(QTreeWidgetItem *parent, const AnimTrack &track, const QString &name)
-{
-    const auto target = track.param.isEmpty() ? QStringLiteral("Unassigned") : track.param;
-    const QString source = track.oscillator
-        ? QStringLiteral("%1 · %2 s period").arg(animWaveKeys().value(int(track.wave)).replace(QLatin1Char('_'), QLatin1Char(' '))).arg(track.period)
-        : QStringLiteral("%1 key(s)").arg(track.keys.size());
-    auto *row = new QTreeWidgetItem(parent, {name, target + QStringLiteral(" · ") + source});
-    for (size_t k = 0; k < track.keys.size(); ++k) {
-        const auto &key = track.keys[k];
-        const auto value = key.isCurrentValue ? QStringLiteral("Current value") : track.color
-            ? QStringLiteral("RGB %1, %2, %3").arg(key.rgb[0]).arg(key.rgb[1]).arg(key.rgb[2])
-            : QString::number(key.v);
-        new QTreeWidgetItem(row, {QStringLiteral("Key at %1 s").arg(key.t), value});
-    }
-    for (const auto &data : track.dataFilters) {
-        const auto filter = InteractionStage::fromJson(data.toObject());
-        QString description;
-        for (int i = 0; i < kFilterSettingCount; ++i) {
-            const auto setting = interactionFilterSetting(filter.kind, i);
-            if (setting.name.isEmpty()) continue;
-            if (!description.isEmpty()) description += QStringLiteral(" · ");
-            description += QStringLiteral("%1 %2").arg(setting.name).arg(filter.setting(i));
-        }
-        new QTreeWidgetItem(row, {filter.displayName() + (filter.enabled ? QString() : QStringLiteral(" (bypassed)")), description});
-    }
-    for (size_t i = 0; i < track.axes.size(); ++i)
-        showTrack(row, track.axes[i], i == 0 ? QStringLiteral("X") : QStringLiteral("Y"));
-    row->setExpanded(true);
-}
-}
-
-std::optional<std::vector<Animation>> prepareTimelines(const pxs::core::tree::Preset &preset,
-                                                       const std::function<bool(quint64)> &exists)
-{
-    std::vector<Animation> timelines;
-    for (const auto &[id, definition] : preset.timelines) {
-        const auto timeline = readDefinition(definition);
-        if (!timeline || std::to_string(timeline->id) != id || !exists(timeline->id)) return std::nullopt;
-        timelines.push_back(*timeline);
-    }
-    return timelines;
-}
-
-void addTimelineDetails(QTreeWidget &tree, const pxs::core::tree::Preset &preset)
-{
-    if (preset.timelines.empty()) return;
-    auto *section = new QTreeWidgetItem(&tree, {QStringLiteral("Timelines"), QString::number(preset.timelines.size())});
-    section->setExpanded(true);
-    for (const auto &[id, definition] : preset.timelines) {
-        const auto timeline = readDefinition(definition);
-        if (!timeline) continue;
-        const auto state = timeline->state == AnimState::Playing ? QStringLiteral("Playing")
-            : timeline->state == AnimState::Paused ? QStringLiteral("Paused") : QStringLiteral("Stopped");
-        auto *row = new QTreeWidgetItem(section, {timeline->name, QStringLiteral("%1 · %2 s · %3 track(s)")
-            .arg(state).arg(timeline->duration).arg(timeline->tracks.size())});
-        row->setExpanded(true);
-        for (size_t i = 0; i < timeline->tracks.size(); ++i)
-            showTrack(row, timeline->tracks[i], QStringLiteral("Track %1").arg(i + 1));
-    }
-}
 
 void addParameterEditors(QTreeWidget &tree, QTreeWidgetItem &item, const std::string &path,
                          const pxs::core::tree::Preset &base, pxs::core::tree::Preset &edits,
@@ -164,26 +88,39 @@ void addParameterEditors(QTreeWidget &tree, QTreeWidgetItem &item, const std::st
         const double inherited = column == 2 ? base.timeAt(path, fadeOverride) : base.delayAt(path);
         const auto value = edits.values.find(path);
         const auto number = numbers.find(path);
+        QJsonValue scalar;
         if (column == 1) {
-            edit->setText(value == edits.values.end() ? QString() : QString::fromStdString(value->second));
+            const auto stored = value == edits.values.end() ? QString() : QString::fromStdString(value->second);
+            const auto args = QJsonDocument::fromJson(stored.toUtf8()).array();
+            if (!step && args.size() == 1 && (args[0].isBool() || args[0].isDouble() || args[0].isString())) scalar = args[0];
+            edit->setText(scalar.isString() ? scalar.toString() : scalar.isDouble() ? QString::number(scalar.toDouble(), 'g', 17)
+                : scalar.isBool() ? (scalar.toBool() ? QStringLiteral("true") : QStringLiteral("false")) : stored);
             edit->setPlaceholderText(QString::fromStdString(base.values.at(path)));
-            edit->setToolTip(QStringLiteral("OSCQuery value as JSON arguments. Clear to inherit in a step."));
+            if (step) edit->setToolTip(QStringLiteral("Values as JSON arguments. Clear to inherit."));
         } else {
             if (number != numbers.end()) edit->setText(QString::number(number->second));
             edit->setPlaceholderText(QStringLiteral("%1 · inherited").arg(inherited));
             edit->setToolTip(QStringLiteral("Seconds. Clear to inherit; zero is explicit."));
         }
         tree.setItemWidget(&item, column, edit);
-        QObject::connect(edit, &QLineEdit::editingFinished, edit, [edit, path, column, step, &edits, &numbers, &tree, changed] {
+        QObject::connect(edit, &QLineEdit::editingFinished, edit, [edit, path, column, step, scalar, &edits, &numbers, changed] {
             const QString text = edit->text().trimmed();
             if (column == 1) {
                 if (text.isEmpty() && step) edits.values.erase(path);
                 else {
-                    const auto json = QJsonDocument::fromJson(text.toUtf8());
-                    if (!json.isArray() || json.array().isEmpty()) return;
-                    edits.values[path] = json.toJson(QJsonDocument::Compact).toStdString();
-                    if (auto *item = !step ? tree.itemAt(edit->mapTo(tree.viewport(), QPoint(1, 1))) : nullptr)
-                        item->setData(1, Qt::UserRole, QString::fromStdString(edits.values[path]));
+                    QJsonArray args;
+                    if (scalar.isString()) args.append(edit->text());
+                    else if (scalar.isDouble()) {
+                        bool ok = false;
+                        const double number = text.toDouble(&ok);
+                        if (!ok || !std::isfinite(number)) return;
+                        args.append(number);
+                    } else if (scalar.isBool()) {
+                        if (text != QStringLiteral("true") && text != QStringLiteral("false")) return;
+                        args.append(text == QStringLiteral("true"));
+                    } else args = QJsonDocument::fromJson(text.toUtf8()).array();
+                    if (args.isEmpty()) return;
+                    edits.values[path] = QJsonDocument(args).toJson(QJsonDocument::Compact).toStdString();
                 }
             } else if (text.isEmpty()) numbers.erase(path);
             else {
@@ -247,7 +184,11 @@ PresetView::PresetView(pxs::core::tree::Tree &tree, QUndoStack *undo, PresetHost
     m_deleteBtn->setFixedWidth(32);
     m_deleteBtn->setToolTip(QStringLiteral("Delete selected preset"));
 
+    auto *empty = new QPushButton(QStringLiteral("New Empty"));
+    empty->setObjectName(QStringLiteral("emptyPreset"));
+    empty->setToolTip(QStringLiteral("Create a preset and choose individual parameters"));
     leftToolbar->addWidget(m_captureBtn);
+    leftToolbar->addWidget(empty);
     leftToolbar->addWidget(m_duplicateBtn);
     leftToolbar->addWidget(m_deleteBtn);
     leftLayout->addLayout(leftToolbar);
@@ -258,9 +199,7 @@ PresetView::PresetView(pxs::core::tree::Tree &tree, QUndoStack *undo, PresetHost
     connect(timer, &QTimer::timeout, this, [this, timer] {
         const double seconds = m_recallClock.restart() / 1000.0;
         m_playback.advance(m_tree, seconds);
-        if (m_host)
-            if (auto *privateTree = m_host->deviceParameters()) m_devicePlayback.advance(*privateTree, seconds);
-        if (!m_playback.active() && !m_devicePlayback.active()) timer->stop();
+        if (!m_playback.active()) timer->stop();
     });
     m_playbackTimer = timer;
     m_presetList->setDragDropMode(QAbstractItemView::DragOnly);
@@ -282,7 +221,7 @@ PresetView::PresetView(pxs::core::tree::Tree &tree, QUndoStack *undo, PresetHost
 
     m_updateBtn = new QPushButton(QStringLiteral("Update Preset"));
     m_updateBtn->setObjectName(QStringLiteral("updatePreset"));
-    m_updateBtn->setToolTip(QStringLiteral("Refresh the captured parameters and timelines from the show"));
+    m_updateBtn->setToolTip(QStringLiteral("Read the saved parameter rows again from the current show"));
     m_updateBtn->setEnabled(false);
 
     m_recallBtn = new QPushButton(QStringLiteral("▶ Recall (GO)"));
@@ -324,13 +263,19 @@ PresetView::PresetView(pxs::core::tree::Tree &tree, QUndoStack *undo, PresetHost
     rightLayout->addWidget(m_paramsTree, 1);
 
     auto *bottomRight = new QHBoxLayout;
-    m_checkAllBtn = new QPushButton(QStringLiteral("Include All"));
-    m_uncheckAllBtn = new QPushButton(QStringLiteral("Exclude All"));
+    m_editBtn = new QPushButton(QStringLiteral("Edit"));
+    m_editBtn->setObjectName(QStringLiteral("editPreset"));
+    m_editBtn->setCheckable(true);
+    m_addParameter = new QPushButton(QStringLiteral("Add Parameter"));
+    m_addParameter->setObjectName(QStringLiteral("addPresetParameter"));
+    m_removeParameter = new QPushButton(QStringLiteral("Remove Parameter"));
+    m_removeParameter->setObjectName(QStringLiteral("removePresetParameter"));
     m_statusLabel = new QLabel;
     m_statusLabel->setObjectName(QStringLiteral("caption"));
 
-    bottomRight->addWidget(m_checkAllBtn);
-    bottomRight->addWidget(m_uncheckAllBtn);
+    bottomRight->addWidget(m_editBtn);
+    bottomRight->addWidget(m_addParameter);
+    bottomRight->addWidget(m_removeParameter);
     bottomRight->addSpacing(10);
     bottomRight->addWidget(m_statusLabel, 1);
     rightLayout->addLayout(bottomRight);
@@ -370,6 +315,13 @@ PresetView::PresetView(pxs::core::tree::Tree &tree, QUndoStack *undo, PresetHost
     rebuildScopes();
 
     connect(m_captureBtn, &QPushButton::clicked, this, [this] { captureCurrent(); });
+    connect(empty, &QPushButton::clicked, this, [this] {
+        if (m_scopeCombo->currentIndex() < 0) return;
+        pxs::core::tree::Preset preset;
+        preset.scope = m_scopeCombo->currentData().toString().toStdString();
+        createPreset(std::move(preset));
+        m_editBtn->setChecked(true);
+    });
     connect(m_duplicateBtn, &QPushButton::clicked, this, [this] {
         const int row = m_presetList->currentRow();
         if (row >= 0 && row < int(m_presets.size())) {
@@ -391,7 +343,11 @@ PresetView::PresetView(pxs::core::tree::Tree &tree, QUndoStack *undo, PresetHost
         }
     });
 
-    connect(m_presetList, &QListWidget::currentRowChanged, this, [this](int row) { showPresetDetails(row); });
+    connect(m_presetList, &QListWidget::currentRowChanged, this, [this](int row) {
+        const QSignalBlocker block(m_editBtn);
+        m_editBtn->setChecked(false);
+        showPresetDetails(row);
+    });
     connect(m_presetList, &QListWidget::itemClicked, this, [this] { emit presetSelected(); });
     connect(m_presetList, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem *) {
         recallPreset(m_presetList->currentRow());
@@ -409,39 +365,16 @@ PresetView::PresetView(pxs::core::tree::Tree &tree, QUndoStack *undo, PresetHost
     connect(m_updateBtn, &QPushButton::clicked, this, &PresetView::updateActivePresetFromLive);
     connect(m_recallBtn, &QPushButton::clicked, this, [this] { recallPreset(m_presetList->currentRow()); });
 
-    connect(m_paramsTree, &QTreeWidget::itemChanged, this, &PresetView::applyPresetTreeItemChange);
-
-    connect(m_checkAllBtn, &QPushButton::clicked, this, [this] {
-        const int row = m_presetList->currentRow();
-        if (row < 0 || row >= int(m_presets.size())) return;
-        m_updatingTree = true;
-        for (int i = 0; i < m_paramsTree->topLevelItemCount(); ++i) {
-            auto *top = m_paramsTree->topLevelItem(i);
-            for (int k = 0; k < top->childCount(); ++k) {
-                auto *leaf = top->child(k);
-                const auto address = leaf->data(0, Qt::UserRole).toString().toStdString();
-                if (address.empty()) continue;
-                leaf->setCheckState(0, Qt::Checked);
-                m_presets[row].values.try_emplace(address, leaf->data(1, Qt::UserRole).toString().toStdString());
-            }
-        }
-        m_updatingTree = false;
-        updateActivePresetFromLive();
+    connect(m_editBtn, &QPushButton::toggled, this, [this](bool edit) {
+        m_editBtn->setText(edit ? QStringLiteral("Done") : QStringLiteral("Edit"));
+        showPresetDetails(currentPresetIndex());
     });
-
-    connect(m_uncheckAllBtn, &QPushButton::clicked, this, [this] {
-        const int row = m_presetList->currentRow();
-        if (row < 0 || row >= int(m_presets.size())) return;
-        m_updatingTree = true;
-        for (int i = 0; i < m_paramsTree->topLevelItemCount(); ++i) {
-            auto *top = m_paramsTree->topLevelItem(i);
-            for (int k = 0; k < top->childCount(); ++k)
-                if (top->child(k)->data(0, Qt::UserRole).isValid()) top->child(k)->setCheckState(0, Qt::Unchecked);
-        }
-        m_updatingTree = false;
-        m_presets[size_t(row)].values.clear();
-        emit presetsChanged();
+    connect(m_addParameter, &QPushButton::clicked, this, &PresetView::chooseParameter);
+    connect(m_removeParameter, &QPushButton::clicked, this, &PresetView::removeSelectedParameter);
+    connect(m_paramsTree, &QTreeWidget::currentItemChanged, this, [this](const QTreeWidgetItem *item) {
+        m_removeParameter->setEnabled(item && item->data(0, Qt::UserRole).isValid());
     });
+    showPresetDetails(-1);
 }
 
 PresetView::~PresetView() = default;
@@ -450,33 +383,22 @@ void PresetView::rebuildScopes()
 {
     const auto previous = m_scopeCombo->currentData();
     m_scopeCombo->clear();
-    const auto scopes = m_host ? m_host->scopes() : std::vector<std::pair<QString, QString>>{{QStringLiteral(""), QStringLiteral("Tout l'arbre (Self)")}};
+    const auto scopes = m_host ? m_host->scopes() : std::vector<std::pair<QString, QString>>{{{}, QStringLiteral("All parameters")}};
     for (const auto &[prefix, label] : scopes) m_scopeCombo->addItem(label, prefix);
-    if (m_scopeCombo->count() == 1) {
-        // Also automatically discover primary top-level branches
-        for (const auto &child : m_tree.root().children()) {
-            if (child.second->kind() == pxs::core::tree::Kind::Container || child.second->kind() == pxs::core::tree::Kind::Parameter) {
-                const QString path = QString::fromStdString(child.second->path());
-                m_scopeCombo->addItem(QStringLiteral("Branche : %1").arg(path), path);
-            }
-        }
-    }
-    if (m_host) {
-        const auto timelines = m_host->timelineScopes();
-        if (!timelines.empty()) m_scopeCombo->addItem(QStringLiteral("All timelines"), kTimelinesScope);
-        for (const auto &[id, name] : timelines)
-            m_scopeCombo->addItem(QStringLiteral("Timeline · %1").arg(name), kTimelineScope + QString::number(id));
-    }
     const int index = m_scopeCombo->findData(previous);
     if (index >= 0) m_scopeCombo->setCurrentIndex(index);
+    m_captureBtn->setEnabled(!scopes.empty());
+    const int row = currentPresetIndex();
+    if (row >= 0 && row < int(m_presets.size())) {
+        const int selected = m_scopeCombo->findData(QString::fromStdString(m_presets[row].scope));
+        if (selected >= 0) m_scopeSummary->setText(m_scopeCombo->itemText(selected));
+    }
 }
 
 void PresetView::setPresets(const std::vector<pxs::core::tree::Preset> &presets)
 {
     const int selected = currentPresetIndex();
-    m_updatingTree = true;
     m_paramsTree->clear();
-    m_updatingTree = false;
     m_presets = presets;
     refreshPresetsList();
     if (!m_presets.empty()) selectPreset(std::clamp(selected, 0, int(m_presets.size()) - 1));
@@ -499,8 +421,8 @@ void PresetView::refreshPresetsList()
     for (size_t i = 0; i < m_presets.size(); ++i) {
         const auto &p = m_presets[i];
         const QString name = p.name.empty() ? QStringLiteral("Preset %1").arg(i + 1) : QString::fromStdString(p.name);
-        auto *item = new QListWidgetItem(p.timelines.empty() ? QStringLiteral("%1   (%2 params)").arg(name).arg(p.values.size())
-                                                                  : QStringLiteral("%1   (%2 timelines)").arg(name).arg(p.timelines.size()));
+        auto *item = new QListWidgetItem(name);
+        item->setToolTip(QStringLiteral("%1 parameters").arg(p.values.size()));
         item->setData(Qt::UserRole, QByteArray::fromStdString(p.id));
         m_presetList->addItem(item);
     }
@@ -511,30 +433,24 @@ void PresetView::refreshPresetsList()
 
 void PresetView::captureCurrent(const QString &customName)
 {
-    const QString scope = m_scopeCombo->currentData().toString();
-    pxs::core::tree::Preset p;
-    p.scope = scope.toStdString();
-    if (m_host && (scope == kTimelinesScope || scope.startsWith(kTimelineScope))) {
-        for (const auto &[id, name] : m_host->timelineScopes()) {
-            if (scope != kTimelinesScope && scope != kTimelineScope + QString::number(id)) continue;
-            if (const auto timeline = m_host->readTimeline(id)) p.timelines[std::to_string(id)] = writeDefinition(*timeline);
-        }
-    } else {
-        const auto captureTree = [&](pxs::core::tree::Tree &tree) {
-            std::vector<std::string> paths;
-            collectHoldablePaths(tree.root(), p.scope, paths);
-            if (paths.empty()) return;
-            const auto values = pxs::core::tree::capture(tree, paths).values;
-            p.values.insert(values.begin(), values.end());
-        };
-        captureTree(m_tree);
-        if (m_host)
-            if (auto *privateTree = m_host->deviceParameters()) captureTree(*privateTree);
-    }
-    if (p.isEmpty()) {
-        m_statusLabel->setText(QStringLiteral("No known values in this scope"));
+    if (m_scopeCombo->currentIndex() < 0) return;
+    const auto scope = m_scopeCombo->currentData().toString().toStdString();
+    const auto paths = pxs::core::tree::presetParameters(m_tree, scope);
+    if (paths.empty()) {
+        m_statusLabel->setText(QStringLiteral("No parameters in this scope"));
         return;
     }
+    auto preset = pxs::core::tree::capture(m_tree, paths);
+    if (preset.isEmpty()) {
+        m_statusLabel->setText(QStringLiteral("No values available in this scope"));
+        return;
+    }
+    preset.scope = scope;
+    createPreset(std::move(preset), customName);
+}
+
+void PresetView::createPreset(pxs::core::tree::Preset p, const QString &customName)
+{
     QString name = customName;
     if (name.isEmpty()) {
         const QString scopeText = m_scopeCombo->currentText();
@@ -561,24 +477,8 @@ bool PresetView::recallPreset(int index)
             return false;
         }
     } else {
-        const auto timelines = prepareTimelines(p, [this](quint64 id) { return m_host && m_host->readTimeline(id).has_value(); });
-        if (!timelines) {
-            m_statusLabel->setText(QStringLiteral("Timeline unavailable"));
-            return false;
-        }
-        for (const auto &timeline : *timelines) m_host->restoreTimeline(timeline);
-        auto local = p, devices = p;
-        local.values.clear();
-        devices.values.clear();
-        auto *privateTree = m_host ? m_host->deviceParameters() : nullptr;
-        for (const auto &[path, value] : p.values)
-            (privateTree && privateTree->find(path) ? devices : local).values.emplace(path, value);
-        m_playback.start(m_tree, local);
-        if (privateTree) {
-            devices.actions.clear();
-            m_devicePlayback.start(*privateTree, devices);
-        }
-        if ((m_playback.active() || m_devicePlayback.active()) && !m_playbackTimer->isActive()) {
+        m_playback.start(m_tree, p);
+        if (m_playback.active() && !m_playbackTimer->isActive()) {
             m_recallClock.start();
             m_playbackTimer->start();
         }
@@ -590,116 +490,117 @@ bool PresetView::recallPreset(int index)
 
 void PresetView::showPresetDetails(int index)
 {
-    m_updatingTree = true;
     m_paramsTree->clear();
-    m_paramsTree->setHeaderLabels({QStringLiteral("Parameter"), QStringLiteral("Value"), QStringLiteral("Time (s)"), QStringLiteral("Delay (s)"), QStringLiteral("Curve")});
-    m_fade->setEnabled(index >= 0 && index < int(m_presets.size()));
-    if (index < 0 || index >= int(m_presets.size())) {
-        m_nameEdit->setEnabled(false);
+    const bool selected = index >= 0 && index < int(m_presets.size());
+    const bool editing = selected && m_editBtn->isChecked();
+    m_nameEdit->setEnabled(selected);
+    m_fade->setEnabled(selected);
+    m_updateBtn->setEnabled(selected);
+    m_recallBtn->setEnabled(selected);
+    m_editBtn->setEnabled(selected);
+    m_editBtn->setText(editing ? QStringLiteral("Done") : QStringLiteral("Edit"));
+    m_addParameter->setVisible(editing);
+    m_removeParameter->setVisible(editing);
+    m_removeParameter->setEnabled(false);
+    if (!selected) {
         m_nameEdit->clear();
         m_scopeSummary->clear();
-        m_updateBtn->setEnabled(false);
-        m_recallBtn->setEnabled(false);
-        m_updatingTree = false;
         return;
     }
-    auto &p = m_presets[size_t(index)];
-    m_fade->setValue(p.fade);
-    m_nameEdit->setEnabled(true);
-    m_nameEdit->setText(QString::fromStdString(p.name));
-    m_updateBtn->setEnabled(true);
-    const int scope = m_scopeCombo->findData(QString::fromStdString(p.scope));
-    const auto scopeName = scope >= 0 ? m_scopeCombo->itemText(scope) : QString::fromStdString(p.scope);
-    m_updateBtn->setToolTip(QStringLiteral("Update from captured scope: %1").arg(scopeName));
-    m_scopeSummary->setText(QStringLiteral("Captured scope · %1").arg(scopeName));
-    m_recallBtn->setEnabled(true);
+    auto &preset = m_presets[size_t(index)];
+    m_fade->setValue(preset.fade);
+    m_nameEdit->setText(QString::fromStdString(preset.name));
+    const int scope = m_scopeCombo->findData(QString::fromStdString(preset.scope));
+    m_scopeSummary->setText(scope >= 0 ? m_scopeCombo->itemText(scope) : QString::fromStdString(preset.scope));
+    m_addParameter->setEnabled(scope >= 0);
 
-    // Group items by category (e.g. top-level path segment)
-    std::map<QString, QTreeWidgetItem *> categories;
-    for (const auto &[address, valJson] : p.values) {
-        const QString fullPath = QString::fromStdString(address);
-        const QStringList parts = fullPath.split(QLatin1Char('/'), Qt::SkipEmptyParts);
-        const QString catName = parts.isEmpty() ? QStringLiteral("/") : QStringLiteral("/%1").arg(parts[0]);
-
-        auto &catItem = categories[catName];
-        if (!catItem) {
-            catItem = new QTreeWidgetItem(m_paramsTree, {catName, QString()});
-            catItem->setExpanded(true);
-            addParameterEditors(*m_paramsTree, *catItem, catName.toStdString(), p, p, -1, false, [this] { emit presetsChanged(); });
-            QFont f = catItem->font(0);
-            f.setBold(true);
-            catItem->setFont(0, f);
+    std::map<std::string, QTreeWidgetItem *> groups;
+    for (const auto &[path, value] : preset.values) {
+        QTreeWidgetItem *parent = m_paramsTree->invisibleRootItem();
+        for (size_t end = path.find('/', 1); end != std::string::npos; end = path.find('/', end + 1)) {
+            const auto prefix = path.substr(0, end);
+            if (prefix.size() <= preset.scope.size()) continue;
+            auto &branch = groups[prefix];
+            if (!branch) {
+                branch = new QTreeWidgetItem(parent, {labelFor(m_tree, prefix)});
+                branch->setExpanded(parent == m_paramsTree->invisibleRootItem());
+                if (editing)
+                    addParameterEditors(*m_paramsTree, *branch, prefix, preset, preset, -1, false, [this] { emit presetsChanged(); });
+            }
+            parent = branch;
         }
-
-        const QString leafName = parts.size() > 1 ? parts.mid(1).join(QLatin1Char('/')) : fullPath;
-        auto *leaf = new QTreeWidgetItem(catItem, {leafName, formatJsonValue(valJson)});
-        leaf->setCheckState(0, Qt::Checked);
-        leaf->setData(0, Qt::UserRole, fullPath);
-        leaf->setData(1, Qt::UserRole, QString::fromStdString(valJson));
-        addParameterEditors(*m_paramsTree, *leaf, address, p, p, -1, false, [this] { emit presetsChanged(); });
+        auto *leaf = new QTreeWidgetItem(parent, {labelFor(m_tree, path), formatJsonValue(value)});
+        leaf->setData(0, Qt::UserRole, QString::fromStdString(path));
+        leaf->setToolTip(0, QString::fromStdString(path));
+        if (editing) {
+            addParameterEditors(*m_paramsTree, *leaf, path, preset, preset, -1, false, [this] { emit presetsChanged(); });
+        } else {
+            leaf->setText(2, QString::number(preset.timeAt(path)));
+            leaf->setText(3, QString::number(preset.delayAt(path)));
+        }
     }
-    addTimelineDetails(*m_paramsTree, p);
-    m_updatingTree = false;
 }
 
 void PresetView::updateActivePresetFromLive()
 {
-    const int row = m_presetList->currentRow();
+    const int row = currentPresetIndex();
     if (row < 0 || row >= int(m_presets.size())) return;
-    auto &p = m_presets[size_t(row)];
-
-    std::vector<std::string> addresses, deviceAddresses;
-    auto *privateTree = m_host ? m_host->deviceParameters() : nullptr;
-    for (const auto &[path, value] : p.values) {
-        if (privateTree && privateTree->find(path)) deviceAddresses.push_back(path);
-        else addresses.push_back(path);
-    }
-    bool updated = false;
-    const auto refresh = [&](pxs::core::tree::Tree &tree, const std::vector<std::string> &paths) {
-        if (paths.empty()) return;
-        for (const auto &[path, value] : pxs::core::tree::capture(tree, paths).values) {
-            p.values[path] = value;
-            updated = true;
-        }
-    };
-    refresh(m_tree, addresses);
-    if (privateTree) refresh(*privateTree, deviceAddresses);
-    if (m_host) {
-        for (auto &[id, definition] : p.timelines) {
-            if (const auto timeline = m_host->readTimeline(QString::fromStdString(id).toULongLong())) {
-                definition = writeDefinition(*timeline);
-                updated = true;
-            }
-        }
-    }
-    if (!updated) {
+    auto &preset = m_presets[size_t(row)];
+    std::vector<std::string> paths;
+    for (const auto &entry : preset.values) paths.push_back(entry.first);
+    if (paths.empty()) return;
+    const auto captured = pxs::core::tree::capture(m_tree, paths);
+    if (captured.values.empty()) {
         m_statusLabel->setText(QStringLiteral("No captured targets are available"));
         return;
     }
+    for (const auto &[path, value] : captured.values) preset.values[path] = value;
     showPresetDetails(row);
-    refreshPresetsList();
-    m_statusLabel->setText(QStringLiteral("Updated %1").arg(QString::fromStdString(p.name)));
+    m_statusLabel->setText(QStringLiteral("Updated %1").arg(QString::fromStdString(preset.name)));
     emit presetsChanged();
 }
 
-void PresetView::applyPresetTreeItemChange(QTreeWidgetItem *item, int column)
+void PresetView::chooseParameter()
 {
-    if (m_updatingTree || column != 0 || !item || !item->parent()) return;
-    const int row = m_presetList->currentRow();
-    if (row < 0 || row >= int(m_presets.size())) return;
-
-    auto &p = m_presets[size_t(row)];
-    const std::string address = item->data(0, Qt::UserRole).toString().toStdString();
-    if (address.empty()) return;
-
-    if (item->checkState(0) == Qt::Checked) {
-        // Re-include value
-        const std::string val = item->data(1, Qt::UserRole).toString().toStdString();
-        p.values[address] = val;
-    } else {
-        // Exclude from preset recall
-        p.values.erase(address);
+    const int row = currentPresetIndex();
+    if (row < 0 || !m_editBtn->isChecked()) return;
+    const auto &preset = m_presets[size_t(row)];
+    QMenu menu(this);
+    std::map<std::string, QMenu *> groups;
+    for (const auto &path : pxs::core::tree::presetParameters(m_tree, preset.scope)) {
+        if (preset.values.count(path)) continue;
+        auto *parent = &menu;
+        for (size_t end = path.find('/', 1); end != std::string::npos; end = path.find('/', end + 1)) {
+            const auto prefix = path.substr(0, end);
+            if (prefix.size() <= preset.scope.size()) continue;
+            auto &branch = groups[prefix];
+            if (!branch) branch = parent->addMenu(labelFor(m_tree, prefix));
+            parent = branch;
+        }
+        auto *action = parent->addAction(labelFor(m_tree, path));
+        action->setData(QString::fromStdString(path));
     }
+    if (menu.isEmpty()) menu.addAction(QStringLiteral("No more parameters in this scope"))->setEnabled(false);
+    const auto *chosen = menu.exec(m_addParameter->mapToGlobal(QPoint(0, m_addParameter->height())));
+    if (!chosen || row != currentPresetIndex()) return;
+    const auto path = chosen->data().toString().toStdString();
+    if (path.empty()) return;
+    const auto capture = pxs::core::tree::capture(m_tree, {path});
+    if (capture.values.empty()) return;
+    m_presets[size_t(row)].values.insert(capture.values.begin(), capture.values.end());
+    showPresetDetails(row);
+    emit presetsChanged();
+}
+
+void PresetView::removeSelectedParameter()
+{
+    const int row = currentPresetIndex();
+    const auto *item = m_paramsTree->currentItem();
+    if (row < 0 || !m_editBtn->isChecked() || !item) return;
+    const auto path = item->data(0, Qt::UserRole).toString().toStdString();
+    if (path.empty()) return;
+    m_presets[size_t(row)].removeParameter(path);
+    showPresetDetails(row);
     emit presetsChanged();
 }
 

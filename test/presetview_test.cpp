@@ -39,15 +39,11 @@ std::unique_ptr<Parameter> makeParam(Cell &cell, const std::string &path, Type t
 class TimelineHost : public pxs::presetview::PresetHost
 {
 public:
-    Animation animation;
-    bool available = true;
-    std::vector<std::pair<quint64, QString>> timelineScopes() const override { return {{animation.id, animation.name}}; }
-    std::optional<Animation> readTimeline(quint64 id) const override
+    std::vector<std::pair<QString, QString>> scopes() const override
     {
-        if (!available || id != animation.id) return std::nullopt;
-        return animation;
+        return {{QStringLiteral("/timelines"), QStringLiteral("All timelines")},
+                {QStringLiteral("/timelines/lighting"), QStringLiteral("Lighting")}};
     }
-    void restoreTimeline(const Animation &state) override { animation = state; }
 };
 
 } // namespace
@@ -81,42 +77,44 @@ int main(int argc, char **argv)
     check(speed.value.number().value_or(0) == 0.25, "value restored to 0.25 from preset");
 
     TimelineHost host;
-    host.animation.id = 42;
-    host.animation.name = "Cue lights";
-    AnimTrack dimmer;
-    dimmer.layer = 3;
-    dimmer.param = "/dimmer";
-    dimmer.keys = {AnimKey{0, 0.5}};
-    appendTrackRemap(dimmer, 0, 1, 0, 255);
-    host.animation.tracks = {dimmer};
+    Cell duration{Value(0.5)}, level{Value(0.25)}, external{Value(0.75)};
+    tree.add("/timelines/lighting/settings/duration", makeParam(duration, "Duration", Type::Float));
+    tree.add("/timelines/lighting/tracks/opacity/level", makeParam(level, "Level", Type::Float));
+    tree.add("/devices/millumin/opacity", makeParam(external, "Opacity", Type::Float));
     pxs::presetview::PresetView timelines(tree, nullptr, &host);
     auto *scope = timelines.findChild<QComboBox *>("presetScope");
     auto *update = timelines.findChild<QPushButton *>("updatePreset");
-    check(scope && update && scope->findData("timeline:42") >= 0, "timeline is offered as a scope");
-    if (scope && update) {
-        scope->setCurrentIndex(scope->findData("timeline:42"));
+    auto *edit = timelines.inspector()->findChild<QPushButton *>("editPreset");
+    auto *remove = timelines.inspector()->findChild<QPushButton *>("removePresetParameter");
+    auto *details = timelines.inspector()->findChild<QTreeWidget *>();
+    check(scope && update && edit && remove && details && scope->count() == 2, "only timeline scopes offered");
+    if (scope && update && edit && remove && details) {
+        const std::string path = "/timelines/lighting/tracks/opacity/level";
+        scope->setCurrentIndex(scope->findData("/timelines/lighting"));
         timelines.captureCurrent(QStringLiteral("Lighting"));
-        check(timelines.presets().size() == 1 && timelines.presets().front().values.empty(), "timeline-only preset captured");
+        check(timelines.presets().size() == 1 && timelines.presets().front().values.size() == 2, "timeline parameters only");
         if (!timelines.presets().empty()) {
-            const auto capturedId = timelines.presets().front().id;
-            auto *details = timelines.inspector()->findChild<QTreeWidget *>();
-            check(details && !details->findItems("Remap", Qt::MatchExactly | Qt::MatchRecursive).empty(), "stored filter is shown");
-            scope->setCurrentIndex(0); // the capture menu is independent of the stored scope
-            host.animation.tracks.front().keys.front().v = 0.75;
-            update->click();
-            check(timelines.presets().size() == 1 && timelines.presets().front().id == capturedId &&
-                  timelines.presets().front().scope == "timeline:42", "updating preserves the preset identity and scope");
-            const auto saved = Preset::fromJson(timelines.presets().front().toJson());
+            const auto id = timelines.presets().front().id;
+            auto saved = timelines.presets().front();
+            saved.delays[path] = 1;
             timelines.setPresets({saved});
-            host.animation.tracks.clear();
-            check(timelines.recallPreset(0) && host.animation.tracks.size() == 1, "recall restores a track after serialization");
-            if (!host.animation.tracks.empty()) {
-                const auto &restored = host.animation.tracks.front();
-                check(restored.layer == 3 && restored.param == "/dimmer" && restored.keys.front().v == 0.75 &&
-                      restored.dataFilters == dimmer.dataFilters, "recall restores routing, edited key and Remap");
+            edit->click();
+            const auto rows = details->findItems("Level", Qt::MatchExactly | Qt::MatchRecursive);
+            check(!rows.empty(), "parameter tree uses the short label");
+            if (!rows.empty()) {
+                details->setCurrentItem(rows.front());
+                remove->click();
             }
-            host.available = false;
-            check(!timelines.recallPreset(0), "recall fails if the timeline is missing");
+            check(timelines.presets().front().values.count(path) == 0 && timelines.presets().front().delays.count(path) == 0,
+                  "removing a row clears its value and timing");
+            duration.value = Value(0.8);
+            level.value = Value(0.6);
+            update->click();
+            check(timelines.presets().front().id == id && timelines.presets().front().values.size() == 1,
+                  "update keeps the preset identity and membership");
+            duration.value = Value(0.4);
+            check(timelines.recallPreset(0) && duration.value.number() == 0.8 && level.value.number() == 0.6,
+                  "recall changes only the remaining row");
         }
     }
 

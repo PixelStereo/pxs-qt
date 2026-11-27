@@ -192,7 +192,7 @@ static bool sameKeys(const std::vector<AnimKey> &a, const std::vector<AnimKey> &
 
 static bool sameTrack(const AnimTrack &a, const AnimTrack &b)
 {
-    if (a.layer != b.layer || a.param != b.param || a.enabled != b.enabled || a.oscillator != b.oscillator || a.unitCurve != b.unitCurve ||
+    if (a.name != b.name || a.slug != b.slug || a.layer != b.layer || a.param != b.param || a.enabled != b.enabled || a.oscillator != b.oscillator || a.unitCurve != b.unitCurve ||
         a.color != b.color || a.event != b.event || a.wave != b.wave || a.period != b.period || a.center != b.center ||
         a.amplitude != b.amplitude || a.phase != b.phase || a.seed != b.seed || !sameKeys(a.keys, b.keys) ||
         a.axes.size() != b.axes.size() || a.dataFilters != b.dataFilters)
@@ -1122,15 +1122,12 @@ void TrackRow::build()
         changed();
     });
 
-    m_curveScale = new QComboBox;
-    m_curveScale->addItems({QStringLiteral("Target range"), QStringLiteral("0–1")});
-    m_curveScale->setAccessibleName(QStringLiteral("Curve scale"));
+    m_curveScale = new QCheckBox(QStringLiteral("0–1 curve scale"));
     m_curveScale->setToolTip(QStringLiteral("Changes the graph scale only. Use Remap to change the output."));
-    g->addWidget(new QLabel(QStringLiteral("Curve scale")), r, 0, 1, 2);
-    g->addWidget(m_curveScale, r++, 2, 1, 2);
-    connect(m_curveScale, &QComboBox::currentIndexChanged, this, [this](int index) {
+    g->addWidget(m_curveScale, r++, 0, 1, 4);
+    connect(m_curveScale, &QCheckBox::toggled, this, [this](bool enabled) {
         if (m_filling) return;
-        editedTrack().unitCurve = index == 1;
+        editedTrack().unitCurve = enabled;
         m_ed->laneView(m_i).zoom = 1;
         m_ed->laneView(m_i).center = NAN;
         changed();
@@ -1481,7 +1478,7 @@ void TrackRow::showSignals()
 void TrackRow::fill()
 {
     m_filling = true;
-    m_curveScale->setCurrentIndex(editedTrack().unitCurve ? 1 : 0);
+    m_curveScale->setChecked(editedTrack().unitCurve);
     const AnimTrack &t = editedTrack();
     m_axis->setVisible(track().isPoint());
     m_axisOn->setVisible(track().isPoint());
@@ -1491,6 +1488,7 @@ void TrackRow::fill()
     m_showPath->setChecked(m_ed->laneView(m_i).xyPreview);
     m_pointPreview->setVisible(track().isPoint() && m_showPath->isChecked());
     const bool number = !t.color && !t.event;
+    m_curveScale->setVisible(number && !t.oscillator);
     m_kind->setVisible(number);
     m_lane->setVisible(number);
     m_rawMeter->setVisible(number);
@@ -1555,7 +1553,7 @@ void TrackRow::setLive(double captured, const std::array<double, 3> &capturedRgb
 
 std::pair<double, double> TrackRow::fullRange() const
 {
-    if (editedTrack().unitCurve) return {0.0, 1.0};
+    if (editedTrack().unitCurve && !editedTrack().oscillator) return {0.0, 1.0};
     return {m_lane->fullLo(), m_lane->fullHi()};
 }
 
@@ -1901,6 +1899,10 @@ const std::vector<ParamInfo> &AnimEditor::paramsOf(quint64 layer)
 
 std::pair<double, double> AnimEditor::rangeOf(const AnimTrack &t)
 {
+    if (t.oscillator) {
+        const auto amplitude = std::max(std::abs(t.amplitude), 1e-6);
+        return {t.center - amplitude, t.center + amplitude};
+    }
     if (t.unitCurve) return {0.0, 1.0};
     for (const ParamInfo &p : paramsOf(t.layer))
         if (p.path == t.param) return {p.min, p.max};
@@ -1972,7 +1974,7 @@ void AnimEditor::rebuildRows()
         m_editTrack->clear();
         for (int k = 0; k < int(m_edit.tracks.size()); ++k)
             if (canOverlay(m_edit.tracks[k]))
-                m_editTrack->addItem(QStringLiteral("%1 · %2").arg(k + 1).arg(trackLabel(m_edit.tracks[k])), k);
+                m_editTrack->addItem(trackLabel(m_edit.tracks[k]), k);
         const int selection = m_editTrack->findData(previous);
         if (selection >= 0) m_editTrack->setCurrentIndex(selection);
         m_overlay->setVisible(m_editTrack->count() > 1);
@@ -2006,7 +2008,7 @@ void AnimEditor::updateOverlay()
         const int index = m_editTrack->itemData(i).toInt();
         if (index >= int(m_rows.size()) || index >= int(m_edit.tracks.size())) continue;
         const auto &track = m_edit.tracks[index];
-        m_editTrack->setItemText(i, QStringLiteral("%1 · %2").arg(index + 1).arg(trackLabel(track)));
+        m_editTrack->setItemText(i, trackLabel(track));
         m_editTrack->setItemData(i, index == m_overlayIndex ? QVariant{} : QVariant(color(index)), Qt::ForegroundRole);
         if (!active) continue;
         const auto [lo, hi] = m_rows[index]->fullRange();
