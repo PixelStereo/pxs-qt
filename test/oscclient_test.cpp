@@ -40,6 +40,7 @@ int main(int argc, char **argv)
     double level = 0.25;
     bool on = false;
     int cue = -1;
+    int momentaryHits = 0;
     auto p = std::make_unique<core::tree::Parameter>("level", "Level", core::tree::Parameter::Type::Float);
     p->range(-6, 6).bind([&] { return core::Value(level); }, [&](const core::Value &v) { level = v.number().value_or(0.0); });
     tree.add("/mix/level", std::move(p));
@@ -47,6 +48,13 @@ int main(int argc, char **argv)
     q->bind([&] { return core::Value(on); }, [&](const core::Value &v) { on = v.truthy(); });
     tree.add("/mix/on", std::move(q));
     tree.addAction("/show/go", "i", [&](const core::ValueList &a) { cue = int(a.front().number().value_or(-1)); return true; });
+    const auto hit = [&](const core::ValueList &args) {
+        if (args.size() != 1 || !args.front().isNil()) return false;
+        ++momentaryHits;
+        return true;
+    };
+    tree.addAction("/show/nil", "N", hit);
+    tree.addAction("/show/infinitum", "I", hit);
     OscService service(&tree, "Fake");
     CHECK(service.start(0, 0, false));
 
@@ -82,7 +90,7 @@ int main(int argc, char **argv)
     CHECK(remote.find("/mix/on")->toParamInfo(&info) && info.type == core::tree::ParamInfo::Type::Bool);
     CHECK(remote.find("/show/go")->toParamInfo(&info) && info.type == core::tree::ParamInfo::Type::Int);
     CHECK(!remote.find("/mix")->toParamInfo(&info) && !remote.find("/nowhere"));
-    CHECK(remote.leaves() == QStringList({"/mix/level", "/mix/on", "/show/go"}));
+    CHECK(remote.leaves() == QStringList({"/mix/level", "/mix/on", "/show/go", "/show/infinitum", "/show/nil"}));
 
     // The client: tree, polled values, writes
     Client client;
@@ -144,13 +152,26 @@ int main(int argc, char **argv)
 
     // A control that is a view of the remote parameter
     RemoteSource source(&client);
+    for (const QString &type : {QStringLiteral("N"), QStringLiteral("I")}) {
+        const QString path = type == "N" ? QStringLiteral("/show/nil") : QStringLiteral("/show/infinitum");
+        const RemoteNode *node = client.tree().find(path);
+        CHECK(node && Client::toMessage(*node, {}).types == type);
+        CHECK(source.info(0, path, &info) && info.type == core::tree::ParamInfo::Type::Trigger);
+        const int expected = momentaryHits + 1;
+        CHECK(source.setJson(0, path, QJsonValue(1.0)));
+        pump([&] { return momentaryHits == expected; });
+        CHECK(momentaryHits == expected);
+    }
     const auto view = controls::forParameter(source, 0, "/mix/level", 0);
     CHECK(view && view->kind == controls::Control::Kind::Slider && view->min == -6 && view->max == 6 && view->boundParam == "/mix/level");
     controls::Control c = *view;
     CHECK(controls::setBound(c, source, 4.0));
     pump([&] { return level == 4.0; });
     CHECK(level == 4.0);
-    controls::fillBound(c, source);
+    pump([&] {
+        controls::fillBound(c, source);
+        return c.value == 4.0;
+    });
     CHECK(c.value == 4.0);
     CHECK(controls::forParameter(source, 0, "/mix/on", 0)->kind == controls::Control::Kind::Toggle);
 
