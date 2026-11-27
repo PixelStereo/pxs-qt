@@ -168,7 +168,10 @@ int main(int argc, char **argv)
     CHECK(controls::setBound(c, source, 4.0));
     pump([&] { return level == 4.0; });
     CHECK(level == 4.0);
-    controls::fillBound(c, source);
+    pump([&] {
+        controls::fillBound(c, source);
+        return c.value == 4.0;
+    });
     CHECK(c.value == 4.0);
     CHECK(controls::forParameter(source, 0, "/mix/on", 0)->kind == controls::Control::Kind::Toggle);
 
