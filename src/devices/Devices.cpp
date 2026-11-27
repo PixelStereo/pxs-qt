@@ -92,6 +92,7 @@ void Devices::startDiscovery()
 
 void Devices::found(const pxs::oscquery::Device &device)
 {
+    if (m_discoveryFilter && !m_discoveryFilter(device)) return;
     // Not the application itself: its own name, or its own port on one of this computer's addresses (a loopback, or one the
     // interfaces hold). A host name that starts like this one's is not enough: "studio" also starts "studio-rehearsal".
     if (device.name == m_selfName ||

@@ -113,3 +113,5 @@ void animTransportToJson(const Animation &a, QJsonObject &o);
 void animTransportFromJson(Animation &a, const QJsonObject &o);
 QJsonObject animationDefinitionToJson(const Animation &animation);
 std::optional<Animation> animationDefinitionFromJson(const QJsonObject &definition);
+QJsonObject animationSnapshotToJson(const Animation &animation);
+std::optional<Animation> animationSnapshotFromJson(const QJsonObject &snapshot);

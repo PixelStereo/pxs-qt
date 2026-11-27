@@ -249,3 +249,29 @@ std::optional<Animation> animationDefinitionFromJson(const QJsonObject &definiti
     }
     return animation;
 }
+
+
+QJsonObject animationSnapshotToJson(const Animation &animation)
+{
+    auto snapshot = animationDefinitionToJson(animation);
+    const char *state = animation.state == AnimState::Playing ? "playing"
+        : animation.state == AnimState::Paused ? "paused" : "stopped";
+    snapshot["transport"] = QJsonObject{{"state", QString::fromLatin1(state)}, {"clock", animation.clock},
+        {"oscillator_offset", animation.oscillatorOffset}, {"reversed", animation.reversed}};
+    return snapshot;
+}
+
+std::optional<Animation> animationSnapshotFromJson(const QJsonObject &snapshot)
+{
+    auto animation = animationDefinitionFromJson(snapshot);
+    const auto transport = snapshot.value("transport").toObject();
+    if (!animation || transport.isEmpty()) return std::nullopt;
+    const auto state = transport.value("state").toString();
+    if (state == QStringLiteral("playing")) animation->state = AnimState::Playing;
+    else if (state == QStringLiteral("paused")) animation->state = AnimState::Paused;
+    else if (state != QStringLiteral("stopped")) return std::nullopt;
+    animation->clock = std::clamp(transport.value("clock").toDouble(), 0.0, animation->length());
+    animation->oscillatorOffset = transport.value("oscillator_offset").toDouble();
+    animation->reversed = transport.value("reversed").toBool();
+    return animation;
+}

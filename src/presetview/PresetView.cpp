@@ -84,12 +84,12 @@ const QString kTimelineScope = QStringLiteral("timeline:");
 
 std::optional<Animation> readDefinition(const std::string &text)
 {
-    return animationDefinitionFromJson(QJsonDocument::fromJson(QByteArray::fromStdString(text)).object());
+    return animationSnapshotFromJson(QJsonDocument::fromJson(QByteArray::fromStdString(text)).object());
 }
 
 std::string writeDefinition(const Animation &animation)
 {
-    return QJsonDocument(animationDefinitionToJson(animation)).toJson(QJsonDocument::Compact).toStdString();
+    return QJsonDocument(animationSnapshotToJson(animation)).toJson(QJsonDocument::Compact).toStdString();
 }
 
 void showTrack(QTreeWidgetItem *parent, const AnimTrack &track, const QString &name)
@@ -143,7 +143,10 @@ void addTimelineDetails(QTreeWidget &tree, const pxs::core::tree::Preset &preset
     for (const auto &[id, definition] : preset.timelines) {
         const auto timeline = readDefinition(definition);
         if (!timeline) continue;
-        auto *row = new QTreeWidgetItem(section, {timeline->name, QStringLiteral("%1 s · %2 track(s)").arg(timeline->duration).arg(timeline->tracks.size())});
+        const auto state = timeline->state == AnimState::Playing ? QStringLiteral("Playing")
+            : timeline->state == AnimState::Paused ? QStringLiteral("Paused") : QStringLiteral("Stopped");
+        auto *row = new QTreeWidgetItem(section, {timeline->name, QStringLiteral("%1 · %2 s · %3 track(s)")
+            .arg(state).arg(timeline->duration).arg(timeline->tracks.size())});
         row->setExpanded(true);
         for (size_t i = 0; i < timeline->tracks.size(); ++i)
             showTrack(row, timeline->tracks[i], QStringLiteral("Track %1").arg(i + 1));
@@ -253,8 +256,11 @@ PresetView::PresetView(pxs::core::tree::Tree &tree, QUndoStack *undo, PresetHost
     auto *timer = new QTimer(this);
     timer->setInterval(16);
     connect(timer, &QTimer::timeout, this, [this, timer] {
-        m_playback.advance(m_tree, m_recallClock.restart() / 1000.0);
-        if (!m_playback.active()) timer->stop();
+        const double seconds = m_recallClock.restart() / 1000.0;
+        m_playback.advance(m_tree, seconds);
+        if (m_host)
+            if (auto *privateTree = m_host->deviceParameters()) m_devicePlayback.advance(*privateTree, seconds);
+        if (!m_playback.active() && !m_devicePlayback.active()) timer->stop();
     });
     m_playbackTimer = timer;
     m_presetList->setDragDropMode(QAbstractItemView::DragOnly);
@@ -514,9 +520,16 @@ void PresetView::captureCurrent(const QString &customName)
             if (const auto timeline = m_host->readTimeline(id)) p.timelines[std::to_string(id)] = writeDefinition(*timeline);
         }
     } else {
-        std::vector<std::string> paths;
-        collectHoldablePaths(m_tree.root(), p.scope, paths);
-        if (!paths.empty() || scope.isEmpty()) p.values = pxs::core::tree::capture(m_tree, paths).values;
+        const auto captureTree = [&](pxs::core::tree::Tree &tree) {
+            std::vector<std::string> paths;
+            collectHoldablePaths(tree.root(), p.scope, paths);
+            if (paths.empty()) return;
+            const auto values = pxs::core::tree::capture(tree, paths).values;
+            p.values.insert(values.begin(), values.end());
+        };
+        captureTree(m_tree);
+        if (m_host)
+            if (auto *privateTree = m_host->deviceParameters()) captureTree(*privateTree);
     }
     if (p.isEmpty()) {
         m_statusLabel->setText(QStringLiteral("No known values in this scope"));
@@ -554,8 +567,18 @@ bool PresetView::recallPreset(int index)
             return false;
         }
         for (const auto &timeline : *timelines) m_host->restoreTimeline(timeline);
-        m_playback.start(m_tree, p);
-        if (m_playback.active() && !m_playbackTimer->isActive()) {
+        auto local = p, devices = p;
+        local.values.clear();
+        devices.values.clear();
+        auto *privateTree = m_host ? m_host->deviceParameters() : nullptr;
+        for (const auto &[path, value] : p.values)
+            (privateTree && privateTree->find(path) ? devices : local).values.emplace(path, value);
+        m_playback.start(m_tree, local);
+        if (privateTree) {
+            devices.actions.clear();
+            m_devicePlayback.start(*privateTree, devices);
+        }
+        if ((m_playback.active() || m_devicePlayback.active()) && !m_playbackTimer->isActive()) {
             m_recallClock.start();
             m_playbackTimer->start();
         }
@@ -625,16 +648,22 @@ void PresetView::updateActivePresetFromLive()
     if (row < 0 || row >= int(m_presets.size())) return;
     auto &p = m_presets[size_t(row)];
 
-    std::vector<std::string> addresses;
-    addresses.reserve(p.values.size());
-    for (const auto &[path, value] : p.values) addresses.push_back(path);
+    std::vector<std::string> addresses, deviceAddresses;
+    auto *privateTree = m_host ? m_host->deviceParameters() : nullptr;
+    for (const auto &[path, value] : p.values) {
+        if (privateTree && privateTree->find(path)) deviceAddresses.push_back(path);
+        else addresses.push_back(path);
+    }
     bool updated = false;
-    if (!addresses.empty()) {
-        for (const auto &[path, value] : pxs::core::tree::capture(m_tree, addresses).values) {
+    const auto refresh = [&](pxs::core::tree::Tree &tree, const std::vector<std::string> &paths) {
+        if (paths.empty()) return;
+        for (const auto &[path, value] : pxs::core::tree::capture(tree, paths).values) {
             p.values[path] = value;
             updated = true;
         }
-    }
+    };
+    refresh(m_tree, addresses);
+    if (privateTree) refresh(*privateTree, deviceAddresses);
     if (m_host) {
         for (auto &[id, definition] : p.timelines) {
             if (const auto timeline = m_host->readTimeline(QString::fromStdString(id).toULongLong())) {

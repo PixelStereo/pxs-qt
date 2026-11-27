@@ -33,6 +33,7 @@ class PresetHost
 {
 public:
     virtual ~PresetHost() = default;
+    virtual pxs::core::tree::Tree *deviceParameters() const { return nullptr; }
     virtual std::vector<std::pair<quint64, QString>> timelineScopes() const { return {}; }
     virtual std::optional<Animation> readTimeline(quint64) const { return std::nullopt; }
     virtual void restoreTimeline(const Animation &) {}
@@ -89,7 +90,7 @@ private:
     std::vector<pxs::core::tree::Preset> m_presets;
 
     std::function<bool(int)> m_recall;
-    pxs::core::tree::PresetPlayback m_playback;
+    pxs::core::tree::PresetPlayback m_playback, m_devicePlayback;
     QElapsedTimer m_recallClock;
     QTimer *m_playbackTimer;
     QWidget *m_inspector;

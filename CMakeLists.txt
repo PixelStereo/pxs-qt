@@ -93,11 +93,11 @@ target_link_libraries(pxs_widgets PUBLIC Qt6::Widgets)
 # Interactions: a value driven from outside (a key, a MIDI controller, an OSC message, a signal) through a chain of
 # filters (remap, average, attack-release, curve, threshold, toggle, envelope…), with pick-up and an Action mode; the
 # graph of them. From NyxMap, where it is the Interaction panel's model. Qt Core only.
-add_library(pxs_interaction STATIC src/interaction/Interactions.cpp src/interaction/Anim.cpp src/interaction/TimelineHost.cpp src/interaction/pxs/TimelineHost.h src/interaction/Interactions.h
+add_library(pxs_interaction STATIC src/interaction/Interactions.cpp src/interaction/Anim.cpp src/interaction/TimelineHost.cpp src/interaction/TimelineTree.cpp src/interaction/TimelineTree.h src/interaction/pxs/TimelineHost.h src/interaction/Interactions.h
     src/interaction/InteractionGraph.h src/interaction/Anim.h src/interaction/OnsetAnalysis.h src/interaction/Published.h)
 add_library(pxs::interaction ALIAS pxs_interaction)
 target_include_directories(pxs_interaction PUBLIC src/interaction)
-target_link_libraries(pxs_interaction PUBLIC Qt6::Core pxs-core::timeline pxs-core::filter pxs::params)
+target_link_libraries(pxs_interaction PUBLIC Qt6::Core pxs-core::timeline pxs-core::filter pxs::params PRIVATE pxs-core::device)
 
 # Sequences, the cue lists of a show (from NyxMap): ordered steps that recall a snapshot or a preset or drive a timeline, played by GO,
 # with their waits, follows, groups, tracking and clocks. The application answers what a step needs (SequencerHost.h); the musical
