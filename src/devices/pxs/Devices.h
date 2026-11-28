@@ -64,7 +64,7 @@ public:
     quint64 addOscQuery(const QString &host, quint16 httpPort);
     // Edits a device made by hand (by its id): what it is, where it is, its addresses. False: no such device, or not made by hand
     bool set(const Device &device);
-    void remove(quint64 id); // an OSCQuery device found on the network comes back when it is found again
+    void remove(quint64 id); // only devices added by hand can be removed
     void refresh(quint64 id); // read again (OSCQuery), resolved again (OSC), its port opened again (MIDI)
 
     // The numbers of a device that can be driven: an OSCQuery device has writable numeric nodes, the others' addresses

@@ -361,7 +361,7 @@ bool Devices::set(const Device &device)
 void Devices::remove(quint64 id)
 {
     const Device *d = m_registry.find(id);
-    if (!d) return;
+    if (!d || !d->manual) return;
     const bool dmx = d->kind == Kind::Dmx;
     if (dmx) {
         auto u = m_universes.find(d->universe);

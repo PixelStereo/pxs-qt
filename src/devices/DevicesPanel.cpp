@@ -5,6 +5,8 @@
 
 #include <QCheckBox>
 #include <QComboBox>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
 #include <QHBoxLayout>
@@ -21,6 +23,7 @@
 #include <QTableWidget>
 #include <QToolButton>
 #include <QVBoxLayout>
+#include <functional>
 
 namespace pxs::devices {
 
@@ -188,10 +191,11 @@ DevicesPanel::DevicesPanel(Devices *devices, const QString &hint, QWidget *paren
         ->setToolTip(QStringLiteral("An instrument on a MIDI port and channel: control changes, notes, pitch bend, program changes"));
     menu->setToolTipsVisible(true);
     add->setMenu(menu);
-    auto *remove = new QPushButton(QStringLiteral("Remove"));
+    m_remove = new QPushButton(QStringLiteral("Remove"));
+    m_remove->setObjectName(QStringLiteral("removeDevice"));
     buttons->addWidget(add);
     buttons->addStretch(1);
-    buttons->addWidget(remove);
+    buttons->addWidget(m_remove);
     left->addLayout(buttons);
     root->addLayout(left);
 
@@ -221,26 +225,14 @@ DevicesPanel::DevicesPanel(Devices *devices, const QString &hint, QWidget *paren
     m_status->setWordWrap(true);
     mv->addWidget(m_kindTitle);
     mv->addWidget(m_status);
-    m_form = new QFormLayout;
+    auto *form = new QFormLayout;
     m_name = new QLineEdit;
-    m_host = new QLineEdit;
-    m_host->setPlaceholderText(QStringLiteral("127.0.0.1, or a name"));
-    m_port = wholeBox(1, 65535, 9001);
-    m_universe = wholeBox(0, 63999, 1);
-    m_universe->setToolTip(QStringLiteral("The application's universe: its DMX outputs say where it goes on the network"));
-    m_start = wholeBox(1, 512, 1);
-    m_start->setToolTip(QStringLiteral("The fixture's first channel in its universe"));
-    m_midiPort = new MidiPortBox;
-    m_midiPort->setToolTip(QStringLiteral("The MIDI output (empty: the first one)"));
-    m_channel = wholeBox(1, 16, 1);
-    m_form->addRow(QStringLiteral("Name"), m_name);
-    m_form->addRow(QStringLiteral("Host"), m_host);
-    m_form->addRow(QStringLiteral("UDP port"), m_port);
-    m_form->addRow(QStringLiteral("Universe"), m_universe);
-    m_form->addRow(QStringLiteral("Start address"), m_start);
-    m_form->addRow(QStringLiteral("MIDI port"), m_midiPort);
-    m_form->addRow(QStringLiteral("MIDI channel"), m_channel);
-    mv->addLayout(m_form);
+    form->addRow(QStringLiteral("Name"), m_name);
+    m_patch = new QPushButton(QStringLiteral("Patch…"));
+    m_patch->setObjectName(QStringLiteral("patchDevice"));
+    m_patch->setToolTip(QStringLiteral("Change where this device sends while keeping its mappings"));
+    form->addRow(m_patch);
+    mv->addLayout(form);
     mv->addWidget(new QLabel(QStringLiteral("<b>Addresses</b> — what it takes")));
     m_addresses = new QTableWidget(0, 0);
     m_addresses->verticalHeader()->hide();
@@ -261,7 +253,7 @@ DevicesPanel::DevicesPanel(Devices *devices, const QString &hint, QWidget *paren
 
     connect(m_list, &QListWidget::currentRowChanged, this, [this] { showSelected(); });
     connect(m_list, &QListWidget::itemClicked, this, [this] { emit deviceSelected(selected()); });
-    connect(remove, &QPushButton::clicked, this, [this] {
+    connect(m_remove, &QPushButton::clicked, this, [this] {
         if (const quint64 id = selected()) m_d->remove(id);
     });
     m_list->setContextMenuPolicy(Qt::CustomContextMenu);
@@ -275,10 +267,8 @@ DevicesPanel::DevicesPanel(Devices *devices, const QString &hint, QWidget *paren
         context.addAction(QStringLiteral("Read namespace again"), this, [this, id] { m_d->refresh(id); });
         context.exec(m_list->viewport()->mapToGlobal(point));
     });
-    for (QLineEdit *e : {m_name, m_host}) connect(e, &QLineEdit::editingFinished, this, [this] { store(); });
-    for (QSpinBox *b : {m_port, m_universe, m_start, m_channel}) connect(b, &QSpinBox::editingFinished, this, [this] { store(); });
-    connect(m_midiPort, &QComboBox::activated, this, [this] { store(); });
-    connect(m_midiPort->lineEdit(), &QLineEdit::editingFinished, this, [this] { store(); });
+    connect(m_name, &QLineEdit::editingFinished, this, &DevicesPanel::store);
+    connect(m_patch, &QPushButton::clicked, this, &DevicesPanel::patchSelected);
     connect(addAddress, &QPushButton::clicked, this, [this] {
         const Device *d = m_d->find(selected());
         if (!d || d->kind == Kind::OscQuery) return;
@@ -357,6 +347,7 @@ void DevicesPanel::refresh()
 void DevicesPanel::showSelected()
 {
     const Device *d = m_d->find(selected());
+    m_remove->setVisible(d && d->manual);
     if (!d) {
         m_pages->setCurrentIndex(Empty);
         return;
@@ -377,22 +368,7 @@ void DevicesPanel::showSelected()
     m_pages->setCurrentIndex(MadePage);
     m_kindTitle->setText(QStringLiteral("<b>%1</b>").arg(QString::fromLatin1(core::name(d->kind))));
     m_status->setText(m_d->status(d->id));
-    const bool net = d->kind == Kind::Osc, dmx = d->kind == Kind::Dmx, midi = d->kind == Kind::Midi;
-    m_form->setRowVisible(m_host, net);
-    m_form->setRowVisible(m_port, net);
-    m_form->setRowVisible(m_universe, dmx);
-    m_form->setRowVisible(m_start, dmx);
-    m_form->setRowVisible(m_midiPort, midi);
-    m_form->setRowVisible(m_channel, midi);
     if (!m_name->hasFocus()) m_name->setText(text(d->name));
-    if (!m_host->hasFocus()) m_host->setText(text(d->host));
-    if (!m_port->hasFocus()) m_port->setValue(d->port);
-    if (!m_universe->hasFocus()) m_universe->setValue(d->universe);
-    if (!m_start->hasFocus()) m_start->setValue(d->start);
-    if (!m_channel->hasFocus()) m_channel->setValue(d->midiChannel);
-    if (midi && !m_midiPort->hasFocus()) {
-        static_cast<MidiPortBox *>(m_midiPort)->refreshPorts(text(d->midiPort));
-    }
     if (m_tableFor != d->id || m_tableKind != int(d->kind) || m_addresses->rowCount() != int(d->addresses.size())) fillTable();
     m_filling = false;
 }
@@ -443,24 +419,72 @@ void DevicesPanel::fillTable()
     m_filling = was;
 }
 
+void DevicesPanel::patchSelected()
+{
+    const auto *device = m_d->find(selected());
+    if (!device || !device->manual || device->kind == Kind::OscQuery) return;
+    const Device original = *device;
+    QDialog dialog(this);
+    dialog.setWindowTitle(QStringLiteral("Patch %1").arg(text(original.name)));
+    QFormLayout form(&dialog);
+    std::function<void(Device &)> patch;
+    if (original.kind == Kind::Midi) {
+        auto *port = new MidiPortBox;
+        port->refreshPorts(text(original.midiPort));
+        auto *channel = wholeBox(1, 16, original.midiChannel);
+        form.addRow(QStringLiteral("MIDI port"), port);
+        form.addRow(QStringLiteral("MIDI channel"), channel);
+        patch = [port, channel](Device &d) {
+            d.midiPort = utf8(port->currentText().trimmed());
+            d.midiChannel = channel->value();
+        };
+    } else if (original.kind == Kind::Dmx) {
+        auto *universe = wholeBox(0, 63999, original.universe);
+        auto *start = wholeBox(1, 512, original.start);
+        form.addRow(QStringLiteral("Local universe"), universe);
+        form.addRow(QStringLiteral("Start address"), start);
+        auto *hint = new QLabel(QStringLiteral("Set Art-Net or sACN for this universe in DMX Outputs."));
+        hint->setWordWrap(true);
+        form.addRow(hint);
+        patch = [universe, start](Device &d) {
+            d.universe = universe->value();
+            d.start = start->value();
+        };
+    } else {
+        auto *host = new QLineEdit(text(original.host));
+        auto *port = wholeBox(1, 65535, original.port);
+        form.addRow(QStringLiteral("Host"), host);
+        form.addRow(QStringLiteral("UDP port"), port);
+        patch = [host, port](Device &d) {
+            d.host = utf8(host->text().trimmed());
+            d.port = quint16(port->value());
+        };
+    }
+    auto *error = new QLabel;
+    error->setWordWrap(true);
+    form.addRow(error);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    form.addRow(buttons);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, [&] {
+        const auto *current = m_d->find(original.id);
+        if (!current) { dialog.reject(); return; }
+        Device edited = *current;
+        patch(edited);
+        const auto problem = edited.validate();
+        if (!problem.empty()) { error->setText(text(problem)); return; }
+        if (edited != *current) m_d->set(edited);
+        dialog.accept();
+    });
+    dialog.exec();
+}
+
 void DevicesPanel::store()
 {
     const Device *d = m_d->find(selected());
     if (!d || m_filling || d->kind == Kind::OscQuery) return;
     Device edited = *d;
     edited.name = utf8(m_name->text().trimmed().isEmpty() ? text(d->name) : m_name->text().trimmed());
-    if (d->kind == Kind::Osc) {
-        edited.host = utf8(m_host->text().trimmed());
-        edited.port = quint16(m_port->value());
-    }
-    if (d->kind == Kind::Dmx) {
-        edited.universe = m_universe->value();
-        edited.start = m_start->value();
-    }
-    if (d->kind == Kind::Midi) {
-        edited.midiPort = utf8(m_midiPort->currentText().trimmed());
-        edited.midiChannel = m_channel->value();
-    }
     edited.addresses.clear();
     for (int row = 0; row < m_addresses->rowCount(); ++row) {
         const QTableWidgetItem *path = m_addresses->item(row, 0);
