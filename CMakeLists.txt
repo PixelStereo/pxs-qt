@@ -21,7 +21,8 @@ target_include_directories(pxs_devices PUBLIC src/devices)
 target_link_libraries(pxs_devices PUBLIC pxs-core::device pxs::params Qt6::Core Qt6::Network PRIVATE pxs::oscclient pxs::midi pxs-core::osc pxs-core::dmx)
 
 # The devices on screen: the list and the editor of a device, the same in every application. Qt Widgets.
-add_library(pxs_devicesview STATIC src/devices/DevicesPanel.cpp src/devices/pxs/DevicesPanel.h)
+add_library(pxs_devicesview STATIC src/devices/DevicesPanel.cpp src/devices/pxs/DevicesPanel.h
+    src/devices/DeviceTargetMenu.cpp src/devices/pxs/DeviceTargetMenu.h)
 add_library(pxs::devicesview ALIAS pxs_devicesview)
 set_target_properties(pxs_devicesview PROPERTIES AUTOMOC ON POSITION_INDEPENDENT_CODE ON)
 target_link_libraries(pxs_devicesview PUBLIC pxs::devices Qt6::Widgets PRIVATE pxs::midi)

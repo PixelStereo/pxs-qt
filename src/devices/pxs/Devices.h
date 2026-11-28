@@ -67,7 +67,7 @@ public:
     void remove(quint64 id); // an OSCQuery device found on the network comes back when it is found again
     void refresh(quint64 id); // read again (OSCQuery), resolved again (OSC), its port opened again (MIDI)
 
-    // The numbers of a device that can be driven: an OSCQuery device's leaves of one number that can be written, the others' addresses
+    // The numbers of a device that can be driven: an OSCQuery device has writable numeric nodes, the others' addresses
     std::vector<ParamInfo> params(quint64 id) const;
     bool value(quint64 id, const QString &path, double *v) const; // the last one known (read from the device, or sent)
     // Sends a value in the target protocol's units. Sent again only when it changed (DMX: written in its

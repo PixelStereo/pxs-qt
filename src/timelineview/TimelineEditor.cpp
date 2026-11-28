@@ -1961,6 +1961,7 @@ std::pair<double, double> AnimEditor::rangeOf(const AnimTrack &t)
     if (t.unitCurve) return {0.0, 1.0};
     for (const ParamInfo &p : paramsOf(t.layer))
         if (p.path == t.param) return {p.min, p.max};
+    if (const auto range = m_host->externalAnimationRange(t.layer, t.param)) return *range;
     return {0.0, 1.0};
 }
 

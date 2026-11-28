@@ -26,12 +26,12 @@ QString text(const std::string &s) { return QString::fromUtf8(s.data(), qsizetyp
 
 QByteArray bytes(const std::vector<std::uint8_t> &b) { return QByteArray(reinterpret_cast<const char *>(b.data()), qsizetype(b.size())); }
 
-// The leaves of one number that can be written, as an editor names them ("Mixer › Fader 1"), by their path in the device
+// The writable numeric nodes, as an editor names them ("Mixer › Fader 1"), by their path in the device
 void collect(const RemoteNode &node, const QString &category, std::vector<ParamInfo> &out)
 {
     for (const auto &[name, child] : node.children) {
         pxs::core::tree::ParamInfo core;
-        if (child.isLeaf() && (child.access & 2) && child.kind != QLatin1String("signal") && child.toParamInfo(&core) &&
+        if ((child.access & 2) && child.kind != QLatin1String("signal") && child.toParamInfo(&core) &&
             (core.type == pxs::core::tree::ParamInfo::Type::Float || core.type == pxs::core::tree::ParamInfo::Type::Int ||
              core.type == pxs::core::tree::ParamInfo::Type::Bool)) {
             ParamInfo p = ParamInfo::fromCore(core);
