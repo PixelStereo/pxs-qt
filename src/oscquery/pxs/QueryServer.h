@@ -15,7 +15,9 @@
 #include <QHash>
 #include <QHostAddress>
 #include <QObject>
-#include <QSet>
+#include <QStringList>
+#include <functional>
+#include <utility>
 #include <QTcpServer>
 #include <QTcpSocket>
 
@@ -27,6 +29,7 @@ public:
     explicit QueryServer(const core::tree::Tree *tree, QObject *parent = nullptr);
 
     QAbstractSocket::SocketError listenError() const { return m_server.serverError(); }
+    QString listenErrorString() const { return m_server.errorString(); }
     bool start(quint16 port); // 0: any free port
     void stop();
     bool isListening() const { return m_server.isListening(); }
@@ -46,11 +49,16 @@ public:
         int status = 200;
         QByteArray body;
     };
+    // Called on the server thread before reading a tree that the application materializes on demand.
+    void setBeforeAnswer(std::function<void()> refresh) { m_beforeAnswer = std::move(refresh); }
     Response answer(const QString &method, const QByteArray &target) const;
 
     int webSocketCount() const;
     // A binary OSC packet to the WebSocket clients that listen to this exact address (a slow client misses it)
     void stream(const QString &address, const QByteArray &packet);
+    // Sample readable subscriptions for applications whose values change outside the Tree observer.
+    // Each client gets an initial value and changes. Returns the addresses sent to at least one client.
+    QStringList pollSubscriptions();
     // A JSON text to every WebSocket client (PATH_CHANGED)
     void broadcast(const QByteArray &json);
     // Whether a page of this Origin may open a WebSocket: none (a native client), or this machine's own
@@ -68,11 +76,12 @@ private:
     void command(QTcpSocket *socket, const QByteArray &json);
 
     const core::tree::Tree *m_tree;
+    std::function<void()> m_beforeAnswer;
     QTcpServer m_server;
     struct Client {
         QByteArray buffer;
         bool websocket = false;
-        QSet<QString> listening;
+        QHash<QString, QByteArray> listening; // address and last sampled frame sent
     };
     QHash<QTcpSocket *, Client> m_clients;
     QString m_name = QStringLiteral("pxs");

@@ -5,6 +5,7 @@
 
 #include <QJsonDocument>
 #include <QNetworkInterface>
+#include <QSet>
 #include <QTimer>
 
 namespace pxs {
@@ -24,8 +25,10 @@ QByteArray statusLine(int status)
         case 200: return "200 OK";
         case 204: return "204 No Content";
         case 400: return "400 Bad Request";
+        case 403: return "403 Forbidden";
         case 404: return "404 Not Found";
         case 405: return "405 Method Not Allowed";
+        case 503: return "503 Service Unavailable";
         default: return QByteArray::number(status);
     }
 }
@@ -34,6 +37,7 @@ QByteArray statusLine(int status)
 QueryServer::QueryServer(const core::tree::Tree *tree, QObject *parent)
     : QObject(parent)
     , m_tree(tree)
+    , m_server(this)
     , m_extensions(convert::jsonObjectFromText(core::tree::defaultExtensionsJson()))
 {
     connect(&m_server, &QTcpServer::newConnection, this, &QueryServer::onNewConnection);
@@ -108,6 +112,41 @@ void QueryServer::stream(const QString &address, const QByteArray &packet)
     }
 }
 
+QStringList QueryServer::pollSubscriptions()
+{
+    QHash<QString, QByteArray> sampled;
+    QSet<QString> sent;
+    for (auto client = m_clients.begin(); client != m_clients.end(); ++client) {
+        if (!client->websocket) continue;
+        QTcpSocket *socket = client.key();
+        for (auto subscription = client->listening.begin(); subscription != client->listening.end(); ++subscription) {
+            if (socket->bytesToWrite() > kMaxBacklog) break;
+
+            const QString &address = subscription.key();
+            auto frame = sampled.constFind(address);
+            if (frame == sampled.constEnd()) {
+                QByteArray encoded;
+                const auto *node = m_tree->find(convert::toUtf8(address));
+                if (node && !node->type.empty() && (node->access & 1) && node->get) {
+                    const auto bytes = core::osc::encode(core::tree::Tree::message(*node));
+                    if (!bytes.empty()) {
+                        const QByteArray packet(reinterpret_cast<const char *>(bytes.data()), qsizetype(bytes.size()));
+                        encoded = websocket::encode(websocket::Binary, packet);
+                    }
+                }
+                frame = sampled.insert(address, std::move(encoded));
+            }
+            if (frame->isEmpty()) {
+                subscription->clear();
+            } else if (*subscription != *frame && socket->write(*frame) == frame->size()) {
+                *subscription = *frame;
+                sent.insert(address);
+            }
+        }
+    }
+    return sent.values();
+}
+
 void QueryServer::broadcast(const QByteArray &json)
 {
     const QByteArray frame = websocket::encode(websocket::Text, json);
@@ -138,7 +177,8 @@ void QueryServer::command(QTcpSocket *socket, const QByteArray &json)
     const core::tree::Command parsed = core::tree::parseCommand(std::string_view(json.constData(), std::size_t(json.size())));
     const QString what = convert::fromUtf8(parsed.command), path = convert::fromUtf8(parsed.data);
     Client &c = m_clients[socket];
-    if (what == QLatin1String("LISTEN") && !path.isEmpty() && c.listening.size() < kMaxListening) c.listening.insert(path);
+    if (what == QLatin1String("LISTEN") && !path.isEmpty() && (c.listening.contains(path) || c.listening.size() < kMaxListening))
+        c.listening.insert(path, {});
     else if (what == QLatin1String("IGNORE")) c.listening.remove(path);
 }
 
@@ -172,7 +212,7 @@ void QueryServer::onReadyRead(QTcpSocket *socket)
             }
             QByteArray out = "HTTP/1.1 " + statusLine(resp.status) + "\r\n"
                              "Connection: close\r\n";
-            if (m_cors) out += "Access-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, OPTIONS\r\n";
+            if (m_cors) out += "Access-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, HEAD, OPTIONS\r\n";
             if (!resp.body.isEmpty()) out += "Content-Type: application/json; charset=utf-8\r\n";
             out += "Content-Length: " + QByteArray::number(resp.body.size()) + "\r\n\r\n";
             if (request.value(0) != "HEAD") out += resp.body;
@@ -207,6 +247,7 @@ void QueryServer::onReadyRead(QTcpSocket *socket)
 
 QueryServer::Response QueryServer::answer(const QString &method, const QByteArray &target) const
 {
+    if (m_beforeAnswer && (method == QLatin1String("GET") || method == QLatin1String("HEAD"))) m_beforeAnswer();
     // What is answered is pxs-core's (the same on every platform); this server reads the request and writes the bytes
     core::tree::ServerInfo info;
     info.name = convert::toUtf8(m_name);
