@@ -89,7 +89,7 @@ int main(int argc, char **argv)
     protocol->setCurrentIndex(0);
     emit protocol->activated(0);
     list = qvariant_cast<QList<Output>>(changed.last().at(0));
-    CHECK(list[0].protocol == Protocol::ArtNet && list[0].rate == 44 && rate->maximum() == 44 && list[0].firstUniverse == 0);
+    CHECK(list[0].protocol == Protocol::ArtNet && list[0].rate == 44 && rate->maximum() == 44 && list[0].firstUniverse == 1);
 
     // On, and a name, from the table; a run of edits of one setting carries its field (an undo step merges them)
     table->item(0, 0)->setCheckState(Qt::Checked);
@@ -128,6 +128,12 @@ int main(int argc, char **argv)
     wireFirst->setValue(7);
     list = qvariant_cast<QList<Output>>(changed.last().at(0));
     CHECK(list[0].firstSourceUniverse == 3 && list[0].firstUniverse == 7);
+    const auto outputId = list[0].id;
+    protocol->setCurrentIndex(1);
+    emit protocol->activated(1);
+    list = qvariant_cast<QList<Output>>(changed.last().at(0));
+    CHECK(list[0].id == outputId && list[0].protocol == Protocol::Sacn &&
+          list[0].firstSourceUniverse == 3 && list[0].firstUniverse == 7);
 
     // Several outputs; all off; delete
     add->click();

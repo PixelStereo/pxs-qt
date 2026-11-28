@@ -6,12 +6,10 @@
 // and a range). Show it as a window of its own or put it in a page.
 #include <QWidget>
 
-class QComboBox;
-class QFormLayout;
 class QLabel;
 class QLineEdit;
 class QListWidget;
-class QSpinBox;
+class QPushButton;
 class QStackedWidget;
 class QTableWidget;
 
@@ -38,6 +36,7 @@ private:
     void refresh();      // the list, from the devices
     void showSelected(); // the selected one on the right
     void fillTable();    // its addresses, as its kind shows them
+    void patchSelected();
     void store();        // the device as edited
 
     Devices *m_d;
@@ -47,10 +46,8 @@ private:
     QLabel *m_queryTitle, *m_queryInfo;
     // A device made here
     QLabel *m_kindTitle, *m_status;
-    QFormLayout *m_form;
-    QLineEdit *m_name, *m_host;
-    QSpinBox *m_port, *m_universe, *m_start, *m_channel;
-    QComboBox *m_midiPort;
+    QPushButton *m_remove, *m_patch;
+    QLineEdit *m_name;
     QTableWidget *m_addresses;
     bool m_filling = false;
     quint64 m_tableFor = 0; // the device the table shows

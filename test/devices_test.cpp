@@ -9,6 +9,9 @@
 #include <OscCodec.h>
 
 #include <QApplication>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QPushButton>
 #include <QCheckBox>
 #include <QLabel>
 #include <QElapsedTimer>
@@ -219,6 +222,16 @@ static void saved()
     CHECK(two.fromJson(json));
     CHECK(two.find(a) && two.find(a)->name == "Video" && two.find(b) && two.find(b)->addresses.size() == 1);
     CHECK(two.find(b) && two.find(b)->addresses[0].number == 36 && two.find(b)->midiChannel == 3);
+    if (!two.find(b)) return;
+    Device moved = *two.find(b);
+    moved.midiPort = "Replacement MIDI controller";
+    moved.midiChannel = 5;
+    CHECK(two.set(moved));
+    Devices repatched;
+    CHECK(repatched.fromJson(two.toJson()));
+    const auto *reopened = repatched.find(b);
+    CHECK(reopened && reopened->midiPort == moved.midiPort && reopened->midiChannel == 5 &&
+          reopened->addresses == midi.addresses);
 }
 
 static void panel()
@@ -258,6 +271,45 @@ static void panel()
     CHECK(devices.find(d) && devices.find(d)->addresses[0].path == "/dimmer");
 }
 
+static void repatchFixture()
+{
+    Devices devices;
+    Device fixture;
+    fixture.kind = Kind::Dmx;
+    fixture.name = "Fixture";
+    Address dimmer;
+    dimmer.path = "/light/dimmer";
+    fixture.addresses = {dimmer};
+    fixture.start = 10;
+    const auto id = devices.add(fixture);
+    CHECK(devices.send(id, "/light/dimmer", 64));
+
+    DevicesPanel panel(&devices);
+    panel.select(id);
+    auto *patch = panel.findChild<QPushButton *>("patchDevice");
+    auto *remove = panel.findChild<QPushButton *>("removeDevice");
+    CHECK(patch && remove && !remove->isHidden());
+    if (!patch) return;
+    QTimer::singleShot(0, &panel, [&] {
+        auto *dialog = panel.findChild<QDialog *>();
+        CHECK(dialog);
+        if (!dialog) return;
+        const auto fields = dialog->findChildren<QSpinBox *>();
+        auto *buttons = dialog->findChild<QDialogButtonBox *>();
+        CHECK(fields.size() == 2 && buttons);
+        if (fields.size() != 2 || !buttons) { dialog->reject(); return; }
+        fields[0]->setValue(3);
+        fields[1]->setValue(24);
+        buttons->button(QDialogButtonBox::Ok)->click();
+    });
+    patch->click();
+    const auto *patched = devices.find(id);
+    CHECK(patched && patched->universe == 3 && patched->start == 24 && patched->addresses == fixture.addresses);
+    CHECK(devices.dmxUniverses().at(1).at(9) == 0);
+    CHECK(devices.send(id, "/light/dimmer", 128));
+    CHECK(static_cast<unsigned char>(devices.dmxUniverses().at(3).at(23)) == 128);
+}
+
 static void discoveryLifecycle()
 {
     Devices devices;
@@ -277,6 +329,11 @@ static void discoveryLifecycle()
     const auto visible = devices.all();
     if (visible.empty()) return;
     const auto id = visible.front()->id;
+    panel.select(id);
+    auto *remove = panel.findChild<QPushButton *>("removeDevice");
+    CHECK(remove && remove->isHidden());
+    devices.remove(id);
+    CHECK(list->count() == 1 && devices.find(id));
 
     discovery->handle(announcement(0));
     CHECK(list->count() == 0);
@@ -310,6 +367,7 @@ int main(int argc, char **argv)
     dmxDevices();
     saved();
     panel();
+    repatchFixture();
     discoveryLifecycle();
     if (failures) std::fprintf(stderr, "devices: %d check(s) failed\n", failures);
     else std::printf("devices: ok\n");

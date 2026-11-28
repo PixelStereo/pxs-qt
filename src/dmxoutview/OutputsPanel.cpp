@@ -180,7 +180,7 @@ OutputsPanel::OutputsPanel(QWidget *parent) : QWidget(parent)
             const Protocol p = i == 1 ? Protocol::Sacn : Protocol::ArtNet;
             if (p == o.protocol) return;
             o.protocol = p;
-            o.firstUniverse = p == Protocol::ArtNet ? 0 : 1; // Art-Net counts from 0, sACN from 1
+            o.firstUniverse = std::clamp(o.firstUniverse, p == Protocol::ArtNet ? 0 : 1, p == Protocol::ArtNet ? 32767 : 63999);
             o.rate = std::min(o.rate, o.maxRate());
         });
     });
