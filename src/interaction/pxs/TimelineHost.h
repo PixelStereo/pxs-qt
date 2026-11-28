@@ -9,6 +9,8 @@
 #include <QString>
 
 #include <array>
+#include <optional>
+#include <utility>
 #include <vector>
 
 // Where a timeline is, for the editor (what it shows while it plays; its tracks and keys are the editor's own copy)
@@ -31,6 +33,7 @@ public:
     virtual ~TimelineHost() = default;
     // The numbers of a holder a track can drive, with their ranges (ParamInfo::label "Category › Name" puts them in sub-menus)
     virtual std::vector<ParamInfo> animatableParams(quint64 holder) const = 0;
+    virtual std::optional<std::pair<double, double>> externalAnimationRange(quint64, const QString &) const { return {}; }
     // Its value now; false: it has none at that address
     virtual bool animParamValue(quint64 holder, const QString &path, double *value) const = 0;
     // The colours (driven as path/r, path/g, path/b together) and the points (path/x, path/y), path without the component

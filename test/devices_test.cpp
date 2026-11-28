@@ -1,6 +1,7 @@
 // Devices: an OSC device sends its addresses (as their type says, again only when changed) and an open one any address; a DMX fixture
 // writes its universe on 8 and 16 bits; what was made is read back with its ids; the panel shows each kind
 #include <pxs/Devices.h>
+#include <pxs/DeviceTargetMenu.h>
 #include <pxs/DevicesPanel.h>
 #include <pxs/Discovery.h>
 #include <pxs/MdnsResponder.h>
@@ -14,6 +15,7 @@
 #include <QFormLayout>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QMenu>
 #include <QSpinBox>
 #include <QTableWidget>
 #include <QTimer>
@@ -47,6 +49,40 @@ static std::vector<osc::Message> received(QUdpSocket &socket, size_t count)
         return out.size() >= count;
     });
     return out;
+}
+
+static void parameterMenu()
+{
+    Devices devices;
+    Device device;
+    device.kind = Kind::Dmx;
+    device.name = "Fixture";
+    Address branch, leaf;
+    branch.path = "/color";
+    leaf.path = "/color/red";
+    leaf.channel = 2;
+    device.addresses = {branch, leaf};
+    const quint64 id = devices.add(device);
+    QMenu menu;
+    quint64 selected = 0;
+    QString path;
+    addDeviceTargets(&menu, devices, &menu, [&](quint64 deviceId, const ParamInfo &p) {
+        selected = deviceId;
+        path = p.path;
+    }, id, "/color/red");
+
+    CHECK(menu.actions().size() == 1);
+    if (menu.actions().size() != 1 || !menu.actions().front()->menu()) return;
+    const auto branches = menu.actions().front()->menu()->actions();
+    CHECK(branches.size() == 1 && branches.front()->text() == "color");
+    if (branches.size() != 1 || !branches.front()->menu()) return;
+    const auto actions = branches.front()->menu()->actions();
+    CHECK(actions.size() == 2);
+    if (actions.size() != 2) return;
+    CHECK(actions.front()->text() == "/color" && !actions.front()->isChecked());
+    CHECK(actions.back()->text() == "red" && actions.back()->isChecked());
+    actions.back()->trigger();
+    CHECK(selected == id && path == "/color/red");
 }
 
 static void oscDevices()
@@ -269,6 +305,7 @@ static void discoveryLifecycle()
 int main(int argc, char **argv)
 {
     QApplication app(argc, argv);
+    parameterMenu();
     oscDevices();
     dmxDevices();
     saved();
