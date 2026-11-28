@@ -122,6 +122,33 @@ int main(int argc, char **argv)
     pump(app, [&] { return local.state() == QAbstractSocket::ConnectedState; });
     CHECK(local.state() == QAbstractSocket::ConnectedState);
     CHECK(service.query().webSocketCount() == 2);
+    // A tree backed by external state is sampled without requiring a Tree notification.
+    QueryServer &query = service.query();
+    std::vector<osc::Message> second;
+    QObject::connect(&local, &QWebSocket::binaryMessageReceived, [&](const QByteArray &d) { osc::decode(d, second); });
+    heard.clear();
+    ws.sendTextMessage(QString::fromUtf8(command("LISTEN", "/level")));
+    pump(app, [&] { return !query.pollSubscriptions().isEmpty(); });
+    pump(app, [&] { return !heard.empty(); });
+    CHECK(heard.size() == 1 && std::abs(heard.front().args.value(0).toDouble() - 0.9) < 1e-6);
+
+    local.sendTextMessage(QString::fromUtf8(command("LISTEN", "/level")));
+    pump(app, [&] { return !query.pollSubscriptions().isEmpty(); });
+    pump(app, [&] { return !second.empty(); });
+    CHECK(heard.size() == 1 && second.size() == 1);
+    CHECK(query.pollSubscriptions().isEmpty());
+
+    level = 0.6;
+    CHECK(query.pollSubscriptions() == QStringList{QStringLiteral("/level")});
+    pump(app, [&] { return heard.size() == 2 && second.size() == 2; });
+    CHECK(heard.size() == 2 && second.size() == 2 &&
+          std::abs(heard.back().args.value(0).toDouble() - 0.6) < 1e-6 &&
+          std::abs(second.back().args.value(0).toDouble() - 0.6) < 1e-6);
+
+    // A delegated HTTP answer can materialize a path synchronously.
+    query.setBeforeAnswer([&] { tree.add("/live"); });
+    CHECK(query.answer("GET", "/live").status == 200);
+    query.setBeforeAnswer({});
     local.close();
     ws.close();
     pump(app, [&] { return service.query().webSocketCount() == 0; });
